@@ -1,0 +1,78 @@
+name: Build wheels
+
+on:
+  push:
+    tags:
+      - 'v*.*.*' # Triggers when you push a release tag
+  workflow_dispatch:
+
+jobs:
+  # One native build per OS: PackageCompiler cannot cross-compile, and each
+  # wheel carries its own Julia runtime (one fat wheel would be well over 1 GB).
+  wheel:
+    name: Wheel (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # Don't tie the library to the CI runner's exact CPU
+      KAOS_CPU_TARGET: generic
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12' # must match the Julia version of Manifest.toml
+
+      - uses: julia-actions/cache@v2
+
+      - name: Test the Julia package
+        run: julia --project=. -e "using Pkg; Pkg.instantiate(); Pkg.test()"
+
+      - name: Compile libkaoscleaner
+        run: julia build.jl
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python scripts/build_wheel.py
+
+      - name: Smoke-test the installed wheel
+        shell: bash
+        run: |
+          python -m pip install dist/*.whl
+          cd "$RUNNER_TEMP" # import the installed package, not the checkout
+          python -c "import sys, kaos_cleaner; print(kaos_cleaner.clean_csv(sys.argv[1]))" "$GITHUB_WORKSPACE/test_set.csv"
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  collect:
+    needs: wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist
+
+      - name: Upload wheel set
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaos-cleaner-wheels
+          path: dist/*.whl

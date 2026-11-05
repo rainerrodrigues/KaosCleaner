@@ -1,0 +1,3 @@
+[deps]
+KaosCleaner = "33cd8d56-0019-45b6-a585-d49e6d89a734"
+PackageCompiler = "9b87118b-4619-50d2-8e1e-99f35a4d4d9d"

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=70.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kaos-cleaner"
+dynamic = ["version"]
+description = "Fast CSV cleaning powered by a compiled Julia engine, returned as Arrow/Polars"
+authors = [{ name = "Rainer Rodrigues" }]
+requires-python = ">=3.9"
+dependencies = ["pyarrow>=14", "polars>=0.20", "cffi"]
+
+[tool.setuptools]
+packages = ["kaos_cleaner", "kaos_cleaner.runtime"]
+
+[tool.setuptools.package-data]
+"kaos_cleaner.runtime" = ["*.tar.gz"]
+
+[tool.setuptools.dynamic]
+version = { attr = "kaos_cleaner.__version__" }

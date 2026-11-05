@@ -1,0 +1,14 @@
+# Build outputs
+/kaos_binaries/
+/dist/
+/build/Manifest.toml
+/build/build.log
+/python/build/
+/python/kaos_cleaner/runtime/
+*.egg-info/
+
+# Python
+/venv/
+__pycache__/
+*:Zone.Identifier
+/.claude/
