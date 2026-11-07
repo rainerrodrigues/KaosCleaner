@@ -1,0 +1,58 @@
+name: Docs
+
+# Builds the MkDocs site and publishes it to GitHub Pages. Needs Settings →
+# Pages → Source: "GitHub Actions" once. The API reference is read straight
+# from python/kaos_cleaner's docstrings, so no engine build is involved.
+on:
+  push:
+    branches: [main]
+    paths: [docs/**, mkdocs.yml, CHANGELOG.md, python/kaos_cleaner/**, .github/workflows/docs.yml]
+  pull_request:
+    paths: [docs/**, mkdocs.yml, CHANGELOG.md, python/kaos_cleaner/**, .github/workflows/docs.yml]
+  # The release bot's CHANGELOG commit is pushed with GITHUB_TOKEN, which does
+  # not trigger workflows; rebuild after each release run instead.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the site (strict, so broken links and references fail)
+        run: |
+          python -m pip install -r docs/requirements.txt
+          mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' # PRs only check that the site builds
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

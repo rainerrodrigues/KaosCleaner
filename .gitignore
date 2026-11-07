@@ -3,6 +3,7 @@
 /dist/
 /build/Manifest.toml
 /build/build.log
+/build/build.done
 /python/build/
 /python/kaos_cleaner/runtime/
 *.egg-info/
@@ -12,3 +13,5 @@
 __pycache__/
 *:Zone.Identifier
 /.claude/
+.pytest_cache/
+/site/

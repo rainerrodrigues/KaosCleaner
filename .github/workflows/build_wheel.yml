@@ -1,16 +1,58 @@
-name: Build wheels
+name: Release
 
+# Every push to main asks python-semantic-release whether the Conventional
+# Commits since the last tag warrant a release (fix: / feat: / BREAKING
+# CHANGE). If so it bumps the version, updates CHANGELOG.md, tags vX.Y.Z,
+# builds the wheels from that tag and attaches them to the GitHub release.
+# Uploads to TestPyPI and PyPI also need the repository variable
+# PUBLISH_TO_PYPI=true (Settings > Secrets and variables > Actions).
+# A manual run builds and tests wheels without releasing; on a branch other
+# than main it skips the release step entirely.
 on:
   push:
-    tags:
-      - 'v*.*.*' # Triggers when you push a release tag
+    branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: release # never let two releases race for the same version
+  cancel-in-progress: false
+
 jobs:
+  release:
+    name: Semantic release
+    if: github.ref == 'refs/heads/main' # releases only ever come from main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the version commit and tag, create the GitHub release
+    outputs:
+      released: ${{ steps.semantic.outputs.released }}
+      tag: ${{ steps.semantic.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needs the full history to read commit messages
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Bump version, tag and create GitHub release
+        id: semantic # the CLI writes released/version/tag to $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m pip install python-semantic-release==10.6.2
+          semantic-release -c releaserc.toml version
+
   # One native build per OS: PackageCompiler cannot cross-compile, and each
   # wheel carries its own Julia runtime (one fat wheel would be well over 1 GB).
   wheel:
     name: Wheel (${{ matrix.os }})
+    needs: release
+    if: >-
+      !cancelled() && needs.release.result != 'failure' &&
+      (needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
       matrix:
@@ -19,9 +61,15 @@ jobs:
     env:
       # Don't tie the library to the CI runner's exact CPU
       KAOS_CPU_TARGET: generic
+      # Windows consoles default to cp1252, which cannot print Polars' tables
+      PYTHONUTF8: '1'
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Build the release commit (with the bumped version), not the push
+          # that triggered the run. Empty when nothing was released.
+          ref: ${{ needs.release.outputs.tag }}
 
       - name: Set up Julia
         uses: julia-actions/setup-julia@v2
@@ -51,7 +99,14 @@ jobs:
         run: |
           python -m pip install dist/*.whl
           cd "$RUNNER_TEMP" # import the installed package, not the checkout
-          python -c "import sys, kaos_cleaner; print(kaos_cleaner.clean_csv(sys.argv[1]))" "$GITHUB_WORKSPACE/test_set.csv"
+          python -c "import sys, kaos_cleaner; df = kaos_cleaner.clean_csv(sys.argv[1]); print(df.shape, df.columns)" "$GITHUB_WORKSPACE/test_set.csv"
+
+      - name: Run the bridge tests against the installed wheel
+        shell: bash
+        run: |
+          python -m pip install pytest
+          cd "$RUNNER_TEMP"
+          python -m pytest "$GITHUB_WORKSPACE/python/tests" -v -p no:cacheprovider
 
       - name: Upload wheel
         uses: actions/upload-artifact@v4
@@ -62,6 +117,7 @@ jobs:
 
   collect:
     needs: wheel
+    if: ${{ !cancelled() && needs.wheel.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all wheels
@@ -76,3 +132,74 @@ jobs:
         with:
           name: kaos-cleaner-wheels
           path: dist/*.whl
+
+  release-assets:
+    name: Attach wheels to the GitHub release
+    needs: [release, collect]
+    if: ${{ !cancelled() && needs.release.outputs.released == 'true' && needs.collect.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download wheel set
+        uses: actions/download-artifact@v4
+        with:
+          name: kaos-cleaner-wheels
+          path: dist
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release upload "$TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --clobber
+
+  # Trusted Publishing (OIDC): no API token is stored anywhere. Each index
+  # needs a (pending) publisher for this repo and workflow build_wheel.yml,
+  # with environment "testpypi" or "pypi", and a GitHub environment of the
+  # same name. Releases go to TestPyPI first; PyPI only after that succeeds.
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: [release, collect]
+    if: >-
+      !cancelled() && needs.release.outputs.released == 'true' &&
+      needs.collect.result == 'success' && vars.PUBLISH_TO_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download wheel set
+        uses: actions/download-artifact@v4
+        with:
+          name: kaos-cleaner-wheels
+          path: dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true # a re-run after a partial release must not block PyPI
+
+  publish:
+    name: Publish to PyPI
+    needs: [release, publish-testpypi]
+    if: >-
+      !cancelled() && needs.release.outputs.released == 'true' &&
+      needs.publish-testpypi.result == 'success' && vars.PUBLISH_TO_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # lets the job prove to PyPI which repo/workflow it is
+      contents: read
+
+    steps:
+      - name: Download wheel set
+        uses: actions/download-artifact@v4
+        with:
+          name: kaos-cleaner-wheels
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

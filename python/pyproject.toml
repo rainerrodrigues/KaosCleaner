@@ -1,20 +1,41 @@
 [build-system]
-requires = ["setuptools>=70.1"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "kaos-cleaner"
 dynamic = ["version"]
-description = "Fast CSV cleaning powered by a compiled Julia engine, returned as Arrow/Polars"
+description = "High-throughput CSV cleaner powered by a pre-compiled Julia engine, returning Arrow/Polars data"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Rainer Rodrigues" }]
 requires-python = ">=3.9"
-dependencies = ["pyarrow>=14", "polars>=0.20", "cffi"]
+dependencies = ["pyarrow>=14", "polars>=0.20", "cffi>=1.16"]
+optional-dependencies = { test = ["pytest>=7"] }
+keywords =["csv", "data-cleaning", "arrow", "polars", "julia"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Julia",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+[project.urls]
+Homepage = "https://github.com/rainerrodrigues/KaosCleaner"
+Source = "https://github.com/rainerrodrigues/KaosCleaner"
+Issues = "https://github.com/rainerrodrigues/KaosCleaner/issues"
 
 [tool.setuptools]
 packages = ["kaos_cleaner", "kaos_cleaner.runtime"]
 
 [tool.setuptools.package-data]
-"kaos_cleaner.runtime" = ["*.tar.gz"]
+"kaos_cleaner.runtime" = ["*.tar.xz", "*.tar.gz"]
 
 [tool.setuptools.dynamic]
 version = { attr = "kaos_cleaner.__version__" }

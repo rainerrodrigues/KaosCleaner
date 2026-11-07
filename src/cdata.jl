@@ -180,16 +180,23 @@ end
 encode!(allocs, ::Type{Union{}}, col) = "n", Ptr{Cvoid}[], length(col)
 
 # Strings, and anything without a native mapping, are exported as utf8.
-tostr(x::AbstractString) = x
-tostr(x) = string(x)
+tostr(x) = ismissing(x) ? missing : String(valid_utf8(x isa AbstractString ? x : string(x)))
 
 function encode!(allocs, ::Type, col)
+    eltype(col) <: Union{Missing, AbstractString} || return encode!(allocs, String, map(tostr, col))
     total = 0
     for x in col
-        ismissing(x) || (total += ncodeunits(tostr(x)))
+        ismissing(x) || (total += ncodeunits(x))
     end
-    total <= typemax(Int32) ? encode_strings!(allocs, "u", Int32, col, total) :
-                              encode_strings!(allocs, "U", Int64, col, total)
+    O = total <= typemax(Int32) ? Int32 : Int64
+    fmt = O === Int32 ? "u" : "U"
+    n_before = length(allocs)
+    result = encode_strings!(allocs, fmt, O, col, total)
+    utf8_ok(result[2][2], result[2][3], length(col), total, O) && return result
+    # Arrow requires valid UTF-8: rare columns with bad bytes are repaired
+    # into a String column (valid by construction) and encoded again.
+    foreach(Libc.free, splice!(allocs, n_before+1:length(allocs)))
+    return encode!(allocs, String, map(tostr, col))
 end
 
 function encode_strings!(allocs, fmt, ::Type{O}, col, total) where {O}
@@ -199,7 +206,7 @@ function encode_strings!(allocs, fmt, ::Type{O}, col, total) where {O}
     pos = 0
     for (i, x) in enumerate(col)
         if !ismissing(x)
-            for b in codeunits(tostr(x))
+            for b in codeunits(x)  # iterating beats codeunit(s, i) ~15x for InlineStrings
                 pos += 1
                 unsafe_store!(data, b, pos)
             end
@@ -209,16 +216,33 @@ function encode_strings!(allocs, fmt, ::Type{O}, col, total) where {O}
     return fmt, Ptr{Cvoid}[valid, offsets, data], nulls
 end
 
+# Every value in an encoded string column is valid UTF-8 iff the whole data
+# buffer is, and no value starts with a continuation byte (which would let two
+# broken values combine into one valid sequence). One fast pass over the
+# buffer instead of validating each value separately.
+function utf8_ok(offsets::Ptr, data::Ptr, n::Int, total::Int, ::Type{O}) where {O}
+    total == 0 && return true
+    bytes = unsafe_wrap(Array, Ptr{UInt8}(data), total)
+    isvalid(String, bytes) || return false
+    offs = Ptr{O}(offsets)
+    for i in 1:n
+        start = unsafe_load(offs, i)
+        start < total && (bytes[start + 1] & 0xc0) == 0x80 && return false
+    end
+    return true
+end
+
 # ---------------------------------------------------------------------------
 
 # Fill `sch`/`arr` for one column. On failure everything allocated is freed.
-function export_column!(sch::Ptr{ArrowSchema}, arr::Ptr{ArrowArray}, name::String, col::AbstractVector)
+function export_column!(sch::Ptr{ArrowSchema}, arr::Ptr{ArrowArray}, name::String, col::AbstractVector;
+                        nullable::Bool=false)
     sallocs = Ptr{Cvoid}[]
     aallocs = Ptr{Cvoid}[]
     try
         T = nonmissingtype(eltype(col))
         fmt, bufs, nulls = encode!(aallocs, T, col)
-        flags = (T === eltype(col) && T !== Union{}) ? Int64(0) : ARROW_FLAG_NULLABLE
+        flags = (!nullable && T === eltype(col) && T !== Union{}) ? Int64(0) : ARROW_FLAG_NULLABLE
 
         bufptr = Ptr{Ptr{Cvoid}}(cmalloc!(aallocs, length(bufs) * sizeof(Ptr{Cvoid})))
         for (i, b) in enumerate(bufs)
@@ -228,7 +252,7 @@ function export_column!(sch::Ptr{ArrowSchema}, arr::Ptr{ArrowArray}, name::Strin
                                       C_NULL, C_NULL, array_release_ptr(), private_block(aallocs)))
 
         f = cstring!(sallocs, fmt)
-        n = cstring!(sallocs, name)
+        n = cstring!(sallocs, String(valid_utf8(name)))
         unsafe_store!(sch, ArrowSchema(f, n, C_NULL, flags, 0, C_NULL, C_NULL,
                                        schema_release_ptr(), private_block(sallocs)))
     catch
@@ -240,13 +264,16 @@ function export_column!(sch::Ptr{ArrowSchema}, arr::Ptr{ArrowArray}, name::Strin
 end
 
 """
-    export_dataframe(df, out_schema, out_array)
+    export_dataframe(df, out_schema, out_array; nullable=false)
 
 Export `df` through the Arrow C Data Interface into caller-allocated
 `ArrowSchema`/`ArrowArray` structs. Ownership passes to the caller, who must
-eventually call each struct's `release` callback.
+eventually call each struct's `release` callback. `nullable=true` marks every
+field nullable, so batches of a stream share one schema whether or not a
+given batch happens to contain missing values.
 """
-function export_dataframe(df::AbstractDataFrame, out_schema::Ptr{ArrowSchema}, out_array::Ptr{ArrowArray})
+function export_dataframe(df::AbstractDataFrame, out_schema::Ptr{ArrowSchema}, out_array::Ptr{ArrowArray};
+                          nullable::Bool=false)
     ncols = ncol(df)
     sallocs = Ptr{Cvoid}[]
     aallocs = Ptr{Cvoid}[]
@@ -259,7 +286,7 @@ function export_dataframe(df::AbstractDataFrame, out_schema::Ptr{ArrowSchema}, o
             ca = Ptr{ArrowArray}(cmalloc!(aallocs, sizeof(ArrowArray)))
             unsafe_store!(schildren, cs, i)
             unsafe_store!(achildren, ca, i)
-            export_column!(cs, ca, name, df[!, name])
+            export_column!(cs, ca, name, df[!, name]; nullable)
             done = i
         end
         buffers = Ptr{Ptr{Cvoid}}(cmalloc!(aallocs, sizeof(Ptr{Cvoid})))  # [validity = NULL]
