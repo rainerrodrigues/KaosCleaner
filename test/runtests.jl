@@ -61,6 +61,18 @@ end
         @test KaosCleaner.normalize_name("caf\xe9") == "caf"  # U+FFFD is not a letter: dropped
     end
 
+    @testset "byte_summary fast path matches the generic loop" begin
+        IS = KaosCleaner.CSV.InlineStrings
+        generic(s) = invoke(KaosCleaner.byte_summary, Tuple{AbstractString}, s)
+        chars = vcat(collect(" \tab_9"), Char(0xe9), Char(0xa0), Char(0x3000))
+        for T in (IS.String3, IS.String7, IS.String15), len in 0:sizeof(T)-1, _ in 1:20
+            s = String(rand(chars, len))
+            ncodeunits(s) < sizeof(T) || continue
+            @test KaosCleaner.byte_summary(T(s)) == generic(T(s))
+        end
+        @test KaosCleaner.byte_summary(IS.String7("a\xff")) == generic(IS.String7("a\xff"))
+    end
+
     @testset "duplicate_rows" begin
         d = DataFrame(a=[1, 1, missing, missing, 2, 2], b=[NaN, NaN, missing, missing, -0.0, 0.0])
         @test isequal(d[.!KaosCleaner.duplicate_rows(d), :], unique(d))  # same rules as unique!

@@ -13,7 +13,18 @@ Int Col,Float Col,Bool Col,Date Col,DateTime Col,Text Col,Empty Col
 2,NA,false,2024-01-02,2024-01-02T11:30:00, b ,NA
 """)
 
-csvs = [path]
+# Big enough for CSV.jl to parse in parallel (build.jl runs this with
+# threads), so the multi-threaded parsing path is compiled in as well.
+big = joinpath(dirname(path), "trace_big.csv")
+open(big, "w") do io
+    println(io, "ID,Reading, Place ,When,Label")
+    for i in 1:50_000
+        println(io, i, ",", isodd(i) ? "NA" : string(i / 7), ",", (" loc_1", "loc_2 ", "N/A")[i % 3 + 1],
+                ",2024-01-0", i % 9 + 1, "T10:30:00,label_", i % 997)
+    end
+end
+
+csvs = [path, big]
 sample = joinpath(@__DIR__, "..", "test_set.csv")
 isfile(sample) && push!(csvs, sample)
 

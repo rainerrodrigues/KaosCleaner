@@ -9,6 +9,9 @@ The Julia runtime is looked up in this order:
 2. kaos_binaries/ in the repository checkout this package lives in;
 3. the runtime archive bundled in the wheel, unpacked once into a user cache
    directory (wheels are zip files and cannot hold the runtime's symlinks).
+
+CSV parsing uses one Julia thread per CPU core; set $KAOSCLEANER_THREADS
+(e.g. "1" or "4") before the first call to change that.
 """
 import ctypes
 import json
@@ -139,8 +142,9 @@ def _load():
     # Boot the Julia runtime once, before any other call into the library.
     # kaos_init_julia (not init_julia) leaves this thread GC-safe, so calls and
     # Arrow release callbacks from other Python threads cannot deadlock.
-    argv = (ctypes.c_char_p * 2)(b"kaoscleaner", None)
-    lib.kaos_init_julia(1, argv)
+    threads = os.environ.get("KAOSCLEANER_THREADS", "auto")
+    argv = (ctypes.c_char_p * 3)(b"kaoscleaner", f"--threads={threads}".encode(), None)
+    lib.kaos_init_julia(2, argv)
     _lib = lib
     return lib
 

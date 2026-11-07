@@ -2,7 +2,7 @@ module KaosCleaner
 
 using CSV, DataFrames
 
-export load_dataset, clean_dataset, export_dataframe
+export load_dataset, clean_dataset, clean_dataset!, export_dataframe
 
 include("cleaning.jl")
 include("cdata.jl")
@@ -31,7 +31,7 @@ end
 
 function _process_dataset(filepath::AbstractString, out_schema::Ptr, out_array::Ptr)::Cint
     try
-        df = clean_dataset(load_dataset(filepath))
+        df = clean_dataset!(load_dataset(filepath))
         (out_schema == C_NULL || out_array == C_NULL) &&
             throw(ArgumentError("out_schema and out_array must not be NULL"))
         export_dataframe(df, Ptr{ArrowSchema}(out_schema), Ptr{ArrowArray}(out_array))

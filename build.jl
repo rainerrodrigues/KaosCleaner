@@ -11,6 +11,11 @@ using PackageCompiler, Artifacts
 
 const OUT = joinpath(@__DIR__, "kaos_binaries")
 
+# The library parses with several threads when the host starts it that way
+# (kaos_init_julia with --threads); run the precompile trace threaded too so
+# that code path is compiled in rather than JIT-compiled on first use.
+ENV["JULIA_NUM_THREADS"] = "4"
+
 create_library(@__DIR__, OUT;
     lib_name="libkaoscleaner",
     precompile_execution_file=joinpath(@__DIR__, "build", "precompile.jl"),

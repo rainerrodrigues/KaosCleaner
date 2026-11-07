@@ -180,16 +180,23 @@ end
 encode!(allocs, ::Type{Union{}}, col) = "n", Ptr{Cvoid}[], length(col)
 
 # Strings, and anything without a native mapping, are exported as utf8.
-tostr(x::AbstractString) = valid_utf8(x)
-tostr(x) = valid_utf8(string(x))
+tostr(x) = ismissing(x) ? missing : String(valid_utf8(x isa AbstractString ? x : string(x)))
 
 function encode!(allocs, ::Type, col)
+    eltype(col) <: Union{Missing, AbstractString} || return encode!(allocs, String, map(tostr, col))
     total = 0
     for x in col
-        ismissing(x) || (total += ncodeunits(tostr(x)))
+        ismissing(x) || (total += ncodeunits(x))
     end
-    total <= typemax(Int32) ? encode_strings!(allocs, "u", Int32, col, total) :
-                              encode_strings!(allocs, "U", Int64, col, total)
+    O = total <= typemax(Int32) ? Int32 : Int64
+    fmt = O === Int32 ? "u" : "U"
+    n_before = length(allocs)
+    result = encode_strings!(allocs, fmt, O, col, total)
+    utf8_ok(result[2][2], result[2][3], length(col), total, O) && return result
+    # Arrow requires valid UTF-8: rare columns with bad bytes are repaired
+    # into a String column (valid by construction) and encoded again.
+    foreach(Libc.free, splice!(allocs, n_before+1:length(allocs)))
+    return encode!(allocs, String, map(tostr, col))
 end
 
 function encode_strings!(allocs, fmt, ::Type{O}, col, total) where {O}
@@ -199,7 +206,7 @@ function encode_strings!(allocs, fmt, ::Type{O}, col, total) where {O}
     pos = 0
     for (i, x) in enumerate(col)
         if !ismissing(x)
-            for b in codeunits(tostr(x))
+            for b in codeunits(x)  # iterating beats codeunit(s, i) ~15x for InlineStrings
                 pos += 1
                 unsafe_store!(data, b, pos)
             end
@@ -207,6 +214,22 @@ function encode_strings!(allocs, fmt, ::Type{O}, col, total) where {O}
         unsafe_store!(offsets, O(pos), i + 1)
     end
     return fmt, Ptr{Cvoid}[valid, offsets, data], nulls
+end
+
+# Every value in an encoded string column is valid UTF-8 iff the whole data
+# buffer is, and no value starts with a continuation byte (which would let two
+# broken values combine into one valid sequence). One fast pass over the
+# buffer instead of validating each value separately.
+function utf8_ok(offsets::Ptr, data::Ptr, n::Int, total::Int, ::Type{O}) where {O}
+    total == 0 && return true
+    bytes = unsafe_wrap(Array, Ptr{UInt8}(data), total)
+    isvalid(String, bytes) || return false
+    offs = Ptr{O}(offsets)
+    for i in 1:n
+        start = unsafe_load(offs, i)
+        start < total && (bytes[start + 1] & 0xc0) == 0x80 && return false
+    end
+    return true
 end
 
 # ---------------------------------------------------------------------------
