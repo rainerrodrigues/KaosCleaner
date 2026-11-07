@@ -103,6 +103,9 @@ end
         @test out.stamp[1] == DateTime(2024, 1, 2, 10, 30)
         @test eltype(out.words) == Union{Missing, String}              # "maybe" is not a boolean
         @test isequal(out.count, [1000, 25, missing, 3])               # integers stay integers
+        # Formatted integers beyond Int64 keep the column as text instead of failing (review fix)
+        big = clean_dataset(DataFrame(n=["\$12,345,678,901,234,567,890", "\$1"]))
+        @test eltype(big.n) == String
         @test eltype(clean_dataset(df, CleanOptions(infer_types=false, drop_empty_rows=false)).paid) == Union{Missing, String}
     end
 
@@ -202,6 +205,22 @@ end
         @test count(ismissing, lb.flag) == 10                        # "maybe" did not fit Bool
         @test any(m -> occursin("did not fit Bool", m), last.(KaosCleaner.take_logs!()))
 
+        # Misfits beyond CSV.jl's 100-warning limit are all counted (review fix)
+        decimals = joinpath(dir, "decimals.csv")
+        open(decimals, "w") do io
+            println(io, "n,label")
+            for i in 1:(KaosCleaner.SAMPLE_ROWS + 500)
+                println(io, i <= KaosCleaner.SAMPLE_ROWS ? string(i) : "$(i).5", ",x$(i)")
+            end
+        end
+        KaosCleaner.take_logs!()
+        db = reduce(vcat, read_stream(decimals, "", 100_000))
+        @test count(ismissing, db.n) == 500
+        @test any(m -> occursin("500 values in `n` did not fit Int64", m), last.(KaosCleaner.take_logs!()))
+        # Same as one chunk: CSV.jl then parses with tasks, wrapping the error
+        whole = reduce(vcat, read_stream(decimals, "", 256 * 2^20))
+        @test count(ismissing, whole.n) == 500
+
         @test occursin("needs the whole file", read_stream(path, """{"impute": "median"}"""))
         @test occursin("file not found", read_stream(joinpath(dir, "nope.csv")))
         @test isempty(KaosCleaner.STREAMS)                           # every stream released
@@ -217,6 +236,18 @@ end
             @test KaosCleaner.byte_summary(T(s)) == generic(T(s))
         end
         @test KaosCleaner.byte_summary(IS.String7("a\xff")) == generic(IS.String7("a\xff"))
+    end
+
+    @testset "streaming coercion" begin
+        @test KaosCleaner.coerce_value(Int64, 3.0) === 3
+        @test KaosCleaner.coerce_value(Int64, 3.5) === nothing
+        @test KaosCleaner.coerce_value(Int64, "7") === 7
+        @test KaosCleaner.coerce_value(Bool, 1) === true
+        @test KaosCleaner.coerce_value(Bool, 2) === nothing
+        @test KaosCleaner.coerce_value(DateTime, Date(2024, 1, 2)) == DateTime(2024, 1, 2)
+        @test KaosCleaner.coerce_value(Int64, 1e30) === nothing
+        out, failures = KaosCleaner.coerce_column(Union{Missing, Float64}[1.0, 2.5, missing], Int64)
+        @test isequal(out, [1, missing, missing]) && failures == 1
     end
 
     @testset "parallel paths match sequential" begin

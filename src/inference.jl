@@ -115,7 +115,17 @@ function infer_number(col::AbstractVector)
     end
     decorated || return nothing  # plain numbers: CSV.jl would have parsed them
     T = integral ? Int64 : Float64
-    return Union{Missing, T}[ismissing(x) ? missing : parse(T, replace(x, NUMBER_DECORATION => "")) for x in col]
+    out = Vector{Union{Missing, T}}(undef, length(col))
+    for (i, x) in enumerate(col)
+        if ismissing(x)
+            out[i] = missing
+        else  # tryparse: integers beyond Int64 leave the column as text
+            v = tryparse(T, replace(x, NUMBER_DECORATION => ""))
+            v === nothing && return nothing
+            out[i] = v
+        end
+    end
+    return out
 end
 
 # A conversion chosen by inference, so streaming can apply the same one to
@@ -230,9 +240,9 @@ function impute(col::AbstractVector, strategy::String)
     if strategy in ("ffill", "bfill")
         return fill_direction(col, strategy == "ffill")
     end
+    strategy == "zero" && return fill_zero(col)
     value = strategy == "mean" ? mean(present) :
             strategy == "median" ? median(present) :
-            strategy == "zero" ? zero(eltype(present)) :
             mode_value(present)
     T = promote_type(nonmissingtype(eltype(col)), typeof(value))
     return T[ismissing(x) ? value : x for x in col]
@@ -248,12 +258,24 @@ function mode_value(values::AbstractVector)
     return best
 end
 
-function fill_direction(col::AbstractVector, forward::Bool)
+"Missing values of a numeric column replaced by zero."
+fill_zero(col::AbstractVector) =
+    (T = nonmissingtype(eltype(col)); T[ismissing(x) ? zero(T) : x for x in col])
+
+"""
+    fill_forward(col, start=missing) -> (filled, last)
+
+Missing values replaced by the previous value (`start` before the first one),
+and the last value, which streaming carries into the next batch.
+"""
+function fill_forward(col::AbstractVector, start=missing)
     out = Vector{eltype(col)}(col)
-    idx = forward ? eachindex(out) : reverse(eachindex(out))
-    last = missing
-    for i in idx
+    last = start
+    for i in eachindex(out)
         ismissing(out[i]) ? (out[i] = last) : (last = out[i])
     end
-    return out
+    return out, last
 end
+
+fill_direction(col::AbstractVector, forward::Bool) =
+    forward ? first(fill_forward(col)) : reverse(first(fill_forward(reverse(col))))

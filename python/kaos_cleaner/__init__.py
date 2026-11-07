@@ -4,11 +4,9 @@
     df = clean_csv("data.csv")            # -> polars.DataFrame
     table = process_dataset("data.csv")   # -> pyarrow.Table
 
-The Julia runtime is looked up in this order:
-1. $KAOSCLEANER_HOME, a kaos_binaries/ directory produced by build.jl;
-2. kaos_binaries/ in the repository checkout this package lives in;
-3. the runtime archive bundled in the wheel, unpacked once into a user cache
-   directory (wheels are zip files and cannot hold the runtime's symlinks).
+The engine ships inside the wheel and is unpacked into a user cache directory
+on first use (see `_runtime`); set $KAOSCLEANER_HOME to a kaos_binaries/
+directory to use another build.
 
 CSV parsing uses one Julia thread per CPU core; set $KAOSCLEANER_THREADS
 (e.g. "1" or "4") before the first call to change that.
@@ -18,18 +16,12 @@ parse warnings) go to the standard `logging` logger "kaos_cleaner".
 """
 from __future__ import annotations
 
-import ctypes
 import json
 import logging
 import os
-import platform
-import shutil
-import sys
-import tarfile
-import tempfile
-import threading
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Sequence, Union
+
+from . import _runtime
 
 if TYPE_CHECKING:
     import polars
@@ -40,133 +32,8 @@ PathLike = Union[str, "os.PathLike[str]"]
 __version__ = "0.1.3"
 __all__ = ["clean_csv", "process_dataset", "iter_clean_csv", "clean_csv_to_parquet"]
 
-_PKG_DIR = Path(__file__).resolve().parent
-_ARCHIVES = [_PKG_DIR / "runtime" / f"kaos_runtime.tar.{ext}" for ext in ("xz", "gz")]
-
-_lib = None
-_lock = threading.Lock()
-
 logger = logging.getLogger("kaos_cleaner")
 logger.addHandler(logging.NullHandler())  # applications decide where logs go
-
-
-def _library_relpath() -> Path:
-    system = platform.system()
-    if system == "Linux":
-        return Path("lib") / "libkaoscleaner.so"
-    if system == "Darwin":
-        return Path("lib") / "libkaoscleaner.dylib"
-    if system == "Windows":
-        return Path("bin") / "libkaoscleaner.dll"
-    raise OSError(f"Unsupported operating system: {system}")
-
-
-def _cache_root() -> Path:
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local"
-    elif sys.platform == "darwin":
-        base = Path.home() / "Library" / "Caches"
-    else:
-        base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
-    return Path(base) / "kaos_cleaner"
-
-
-# The marker file lists every unpacked file's size. Checking it on each load
-# catches a runtime left truncated by a crash or power loss mid-unpack, which
-# would otherwise make Julia die with a bus error while mapping its image.
-_MARKER = ".complete"
-
-
-def _runtime_intact(target: Path) -> bool:
-    try:
-        sizes = json.loads((target / _MARKER).read_text())
-        return all(os.path.getsize(target / rel) == size for rel, size in sizes.items())
-    except (OSError, ValueError):
-        return False
-
-
-def _fsync(path: Path):
-    if sys.platform == "win32":  # fsync needs a writable handle there
-        return
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def _unpack_runtime(archive: Path) -> Path:
-    target = _cache_root() / f"{__version__}-{archive.stat().st_size}"
-    if _runtime_intact(target):
-        return target
-    shutil.rmtree(target, ignore_errors=True)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = Path(tempfile.mkdtemp(dir=target.parent, prefix=".unpack-"))
-    try:
-        with tarfile.open(archive) as tar:
-            if hasattr(tarfile, "data_filter"):
-                tar.extractall(tmp, filter="data")
-            else:
-                tar.extractall(tmp)
-            sizes = {m.name: m.size for m in tar.getmembers() if m.isfile()}
-        # Flush the data before the marker, so the marker never outlives it
-        for rel in sizes:
-            _fsync(tmp / rel)
-        (tmp / _MARKER).write_text(json.dumps(sizes))
-        _fsync(tmp / _MARKER)
-        try:
-            os.replace(tmp, target)
-        except OSError:
-            if not _runtime_intact(target):  # lost a race to another process
-                raise
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    return target
-
-
-def _runtime_dir() -> Path:
-    home = os.environ.get("KAOSCLEANER_HOME")
-    if home:
-        return Path(home)
-    checkout = _PKG_DIR.parent.parent
-    if (checkout / "build.jl").exists() and (checkout / "kaos_binaries").exists():
-        return checkout / "kaos_binaries"
-    archive = next((a for a in _ARCHIVES if a.exists()), None)
-    if archive is not None:
-        return _unpack_runtime(archive)
-    raise OSError("KaosCleaner runtime not found; set KAOSCLEANER_HOME to a kaos_binaries directory")
-
-
-def _load():
-    global _lib
-    if _lib is not None:
-        return _lib
-    lib_path = _runtime_dir() / _library_relpath()
-    if not lib_path.exists():
-        raise OSError(f"{lib_path} does not exist; build it with `julia build.jl`")
-    if sys.platform == "win32":
-        os.add_dll_directory(str(lib_path.parent))  # the Julia DLLs sit next to it
-
-    lib = ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
-    lib.kaos_init_julia.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
-    lib.kaos_init_julia.restype = None
-    lib.process_dataset_with_options.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p]
-    lib.process_dataset_with_options.restype = ctypes.c_int
-    lib.kaos_last_error.argtypes = []
-    lib.kaos_last_error.restype = ctypes.c_char_p
-    lib.kaos_take_logs.argtypes = []
-    lib.kaos_take_logs.restype = ctypes.c_char_p
-    lib.kaos_open_stream.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int64, ctypes.c_void_p]
-    lib.kaos_open_stream.restype = ctypes.c_int
-
-    # Boot the Julia runtime once, before any other call into the library.
-    # kaos_init_julia (not init_julia) leaves this thread GC-safe, so calls and
-    # Arrow release callbacks from other Python threads cannot deadlock.
-    threads = os.environ.get("KAOSCLEANER_THREADS", "auto")
-    argv = (ctypes.c_char_p * 3)(b"kaoscleaner", f"--threads={threads}".encode(), None)
-    lib.kaos_init_julia(2, argv)
-    _lib = lib
-    return lib
 
 
 def _emit_logs(lib):
@@ -186,6 +53,15 @@ def _options_json(*, drop=None, keep=None, missing_values=None, rename=None, ded
                    datetime_formats=datetime_formats, impute=impute)
     return json.dumps({k: list(v) if isinstance(v, (tuple, set)) else v
                        for k, v in options.items() if v is not None})
+
+
+def _release(*structs):
+    """Call the release callback of exported Arrow structs nobody imported."""
+    from pyarrow.cffi import ffi
+
+    for c in structs:
+        if c.release != ffi.NULL:
+            c.release(c)
 
 
 def process_dataset(path: PathLike, *, drop: Sequence[str] | None = None,
@@ -237,14 +113,18 @@ def process_dataset(path: PathLike, *, drop: Sequence[str] | None = None,
     ptr_schema = int(ffi.cast("uintptr_t", c_schema))
     ptr_array = int(ffi.cast("uintptr_t", c_array))
 
-    with _lock:
-        lib = _load()
+    with _runtime.lock:
+        lib = _runtime.load()
         status = lib.process_dataset_with_options(os.fsencode(path), options.encode(), ptr_schema, ptr_array)
         _emit_logs(lib)
         if status != 0:
             raise RuntimeError(lib.kaos_last_error().decode("utf-8", errors="replace"))
 
-    batch = pa.RecordBatch._import_from_c(ptr_array, ptr_schema)
+    try:
+        batch = pa.RecordBatch._import_from_c(ptr_array, ptr_schema)
+    except BaseException:
+        _release(c_array, c_schema)  # otherwise the engine's buffers would leak
+        raise
     return pa.Table.from_batches([batch])
 
 
@@ -301,21 +181,27 @@ def iter_clean_csv(path: PathLike, *, chunk_size: int = DEFAULT_CHUNK_SIZE,
     options_json = _options_json(**options)
     c_stream = ffi.new("struct ArrowArrayStream*")
     ptr_stream = int(ffi.cast("uintptr_t", c_stream))
-    with _lock:
-        lib = _load()
+    with _runtime.lock:
+        lib = _runtime.load()
         status = lib.kaos_open_stream(os.fsencode(path), options_json.encode(), int(chunk_size), ptr_stream)
         _emit_logs(lib)
         if status != 0:
             raise RuntimeError(lib.kaos_last_error().decode("utf-8", errors="replace"))
-        source = pa.RecordBatchReader._import_from_c(ptr_stream)
+        try:
+            source = pa.RecordBatchReader._import_from_c(ptr_stream)
+        except BaseException:
+            _release(c_stream)
+            raise
 
     def batches():
         while True:
-            with _lock:  # one engine call at a time; logs belong to this batch
+            with _runtime.lock:  # one engine call at a time; logs belong to this batch
                 try:
                     batch = source.read_next_batch()
                 except StopIteration:
                     return
+                except pa.ArrowException as e:  # the engine's message, from get_last_error
+                    raise RuntimeError(str(e)) from e
                 finally:
                     _emit_logs(lib)
             yield batch

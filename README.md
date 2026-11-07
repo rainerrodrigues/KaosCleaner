@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/rainerrodrigues/KaosCleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/rainerrodrigues/KaosCleaner/actions/workflows/ci.yml)
 [![Docs](https://github.com/rainerrodrigues/KaosCleaner/actions/workflows/docs.yml/badge.svg)](https://rainerrodrigues.github.io/KaosCleaner/)
-[![Release](https://img.shields.io/github/v/release/rainerrodrigues/KaosCleaner?include_prereleases&sort=semver)](https://github.com/rainerrodrigues/KaosCleaner/releases)
+[![PyPI](https://img.shields.io/pypi/v/kaos-cleaner)](https://pypi.org/project/kaos-cleaner/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Fast, forgiving CSV cleaning for Python, powered by a compiled Julia engine.**
@@ -66,15 +66,13 @@ were dropped.
 
 ## Install
 
-Wheels for Linux x86_64, Windows x86_64 and macOS (Apple silicon), Python 3.9+,
-are attached to each [GitHub release](https://github.com/rainerrodrigues/KaosCleaner/releases).
-Download the one for your platform and install it:
-
 ```bash
-pip install kaos_cleaner-0.1.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+pip install kaos-cleaner
 ```
 
-Once the package is on PyPI this becomes `pip install kaos-cleaner`.
+Wheels are published for Linux x86_64 (glibc 2.17+), Windows x86_64 and macOS
+11+ on Apple silicon, for Python 3.9 and newer; each is also attached to its
+[GitHub release](https://github.com/rainerrodrigues/KaosCleaner/releases).
 
 The first call unpacks the bundled Julia runtime (about 500 MB) into your user
 cache directory, which takes a few seconds once.
@@ -138,7 +136,7 @@ PyArrow wraps them without copying. More in
 | `python/tests/` | Python bridge tests and benchmarks |
 | `build.jl`, `build/` | Compile the engine with PackageCompiler |
 | `include/kaoscleaner.h` | C API |
-| `scripts/` | Wheel builder and memory check |
+| `scripts/` | Wheel builder and benchmark |
 | `docs/`, `mkdocs.yml` | Documentation site |
 | `.github/workflows/` | CI, releases, docs |
 

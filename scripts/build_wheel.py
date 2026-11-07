@@ -22,7 +22,7 @@ PACKAGE = ROOT / "python"
 RUNTIME = PACKAGE / "kaos_cleaner" / "runtime"
 
 sys.path.insert(0, str(PACKAGE))
-from kaos_cleaner import _library_relpath  # noqa: E402
+from kaos_cleaner._runtime import library_relpath  # noqa: E402
 
 
 def manylinux_tag():
@@ -52,7 +52,7 @@ def main():
     parser.add_argument("--gzip", action="store_true", help="fast gzip packing instead of xz")
     args = parser.parse_args()
 
-    library = BINARIES / _library_relpath()
+    library = BINARIES / library_relpath()
     if not library.exists():
         sys.exit(f"{library} not found; run `julia build.jl` first")
 

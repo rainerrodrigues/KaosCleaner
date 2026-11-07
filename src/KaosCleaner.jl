@@ -4,6 +4,9 @@ using CSV, DataFrames, JSON3, Logging
 
 export load_dataset, clean_dataset, clean_dataset!, export_dataframe, CleanOptions
 
+"Below this many rows, splitting work across tasks costs more than it saves."
+const PARALLEL_MIN_ROWS = 50_000
+
 include("options.jl")
 include("cleaning.jl")
 include("inference.jl")

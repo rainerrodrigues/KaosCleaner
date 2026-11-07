@@ -63,10 +63,20 @@ unsafe_string(KaosCleaner.kaos_take_logs())
 # Streaming: open a stream over the big file in small chunks and drain it
 # through its C callbacks, as pyarrow does
 using KaosCleaner: ArrowArrayStream
-for opts in ("", """{"impute": "ffill"}""")
+# A file whose later rows do not fit the sampled types, so the strict-parse
+# fallback and coerce_column are compiled in too
+misfit = joinpath(dirname(path), "trace_misfit.csv")
+open(misfit, "w") do io
+    println(io, "n,when,label")
+    for i in 1:(KaosCleaner.SAMPLE_ROWS + 5_000)
+        late = i > KaosCleaner.SAMPLE_ROWS
+        println(io, late ? "$(i).5" : string(i), ",", late ? "soon" : "2024-01-02T10:30:00", ",x", i)
+    end
+end
+for (file, opts) in ((big, ""), (big, """{"impute": "ffill"}"""), (misfit, ""))
     st = Ptr{ArrowArrayStream}(Libc.calloc(1, sizeof(ArrowArrayStream)))
-    rc = GC.@preserve big opts KaosCleaner.kaos_open_stream(
-        Base.unsafe_convert(Cstring, big), Base.unsafe_convert(Cstring, opts), Int64(256 * 1024), Ptr{Cvoid}(st))
+    rc = GC.@preserve file opts KaosCleaner.kaos_open_stream(
+        Base.unsafe_convert(Cstring, file), Base.unsafe_convert(Cstring, opts), Int64(256 * 1024), Ptr{Cvoid}(st))
     rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
     s = unsafe_load(st)
     sch = Ptr{ArrowSchema}(Libc.calloc(1, sizeof(ArrowSchema)))
@@ -84,6 +94,6 @@ unsafe_string(KaosCleaner.kaos_take_logs())
 
 # Error path
 GC.@preserve begin
-    KaosCleaner.process_dataset(Base.unsafe_convert(Cstring, "dummy.csv"), C_NULL, C_NULL)
+    KaosCleaner.process_dataset(Base.unsafe_convert(Cstring, "does_not_exist.csv"), C_NULL, C_NULL)
     unsafe_string(KaosCleaner.kaos_last_error())
 end
