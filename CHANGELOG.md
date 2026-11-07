@@ -5,6 +5,22 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.1.4 (2026-11-07)
+
+### Bug Fixes
+
+- Exact misfit counts when streaming, no overflow abort on big numbers
+  ([`0946d7c`](https://github.com/rainerrodrigues/KaosCleaner/commit/0946d7ce50d9ca3e659c80e7ac626c1cb49d8b8b))
+
+- Release unimported results, RuntimeError for stream errors, prune old runtimes
+  ([`824e16f`](https://github.com/rainerrodrigues/KaosCleaner/commit/824e16f4e16d42666f33d388149321cdb5a3fbf1))
+
+### Documentation
+
+- PyPI install, current benchmarks, C API threading note, v0.1.0 notes
+  ([`7c2eacd`](https://github.com/rainerrodrigues/KaosCleaner/commit/7c2eacd92aa4c44ede45dc67d99cb09bc5634f51))
+
+
 ## v0.1.3 (2026-11-07)
 
 ### Documentation
