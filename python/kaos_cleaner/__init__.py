@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 PathLike = Union[str, "os.PathLike[str]"]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = ["clean_csv", "process_dataset", "iter_clean_csv", "clean_csv_to_parquet"]
 
 _PKG_DIR = Path(__file__).resolve().parent

@@ -1,6 +1,6 @@
 name = "KaosCleaner"
 uuid = "33cd8d56-0019-45b6-a585-d49e6d89a734"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Rainer Rodrigues <rainerrodrigues16@gmail.com>"]
 
 [deps]
