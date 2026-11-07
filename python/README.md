@@ -48,7 +48,7 @@ for batch in iter_clean_csv("huge.csv"):            # pyarrow.RecordBatch stream
 
 ## Good to know
 
-- **First import** unpacks the bundled Julia runtime (~600 MB) into your user
+- **First import** unpacks the bundled Julia runtime (~500 MB) into your user
   cache directory (`~/.cache/kaos_cleaner` on Linux, `~/Library/Caches` on
   macOS, `%LOCALAPPDATA%` on Windows). This takes a few seconds once; later
   imports start in well under a second.

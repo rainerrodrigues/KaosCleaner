@@ -74,6 +74,27 @@ if !Sys.iswindows() && Sys.which("strip") !== nothing
     run(Sys.isapple() ? `strip -S $lib` : `strip --strip-debug $lib`)
 end
 
+# Julia's own Linux and Windows libraries ship with debug info (macOS keeps it
+# in separate dSYM files): libjulia-codegen alone shrinks from 77 to 3 MB.
+# Stripping all of them takes the runtime from ~627 to ~512 MB and the Linux
+# wheel from ~107 to ~81 MiB, under PyPI's 100 MiB per-file limit.
+function strip_command()
+    if Sys.iswindows()  # strip.exe ships with the MinGW toolchain PackageCompiler uses
+        exe = joinpath(dirname(first(PackageCompiler.get_compiler_cmd().exec)), "strip.exe")
+        return isfile(exe) ? exe : nothing
+    end
+    return Sys.isapple() ? nothing : Sys.which("strip")
+end
+strip_exe = strip_command()
+if strip_exe !== nothing
+    libdirs = Sys.iswindows() ? [joinpath(OUT, "bin")] : [joinpath(OUT, "lib"), joinpath(OUT, "lib", "julia")]
+    shared = Sys.iswindows() ? r"\.dll$"i : r"\.so(\.|$)"  # libLLVM.so.18.1jl, libstdc++.so.6.0.33, ...
+    for dir in libdirs, file in readdir(dir; join=true)
+        (islink(file) || !isfile(file) || !occursin(shared, basename(file))) && continue
+        run(`$strip_exe --strip-debug $file`)
+    end
+end
+
 # On macOS PackageCompiler gives the library @executable_path rpaths, so it
 # only finds libjulia when the host program sits in lib/ (Linux uses $ORIGIN,
 # the library's own directory). Add the @loader_path equivalents so any host,

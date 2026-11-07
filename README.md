@@ -76,7 +76,7 @@ pip install kaos_cleaner-0.1.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_
 
 Once the package is on PyPI this becomes `pip install kaos-cleaner`.
 
-The first call unpacks the bundled Julia runtime (about 600 MB) into your user
+The first call unpacks the bundled Julia runtime (about 500 MB) into your user
 cache directory, which takes a few seconds once.
 
 ## Usage

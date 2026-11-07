@@ -63,7 +63,7 @@ logging. Enable it in your application, for example
 ## Memory use is high
 
 - In memory, expect peak usage of a few times the file size, plus about
-  600 MB for the runtime. Use [streaming](large-files.md) for files that do
+  500 MB for the runtime. Use [streaming](large-files.md) for files that do
   not fit.
 - Streaming with `dedupe=True` keeps 16 bytes (about 33 with overhead) per
   distinct row; pass `dedupe=False` for billions of rows.
