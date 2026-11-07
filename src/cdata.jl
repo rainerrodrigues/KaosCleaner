@@ -180,8 +180,8 @@ end
 encode!(allocs, ::Type{Union{}}, col) = "n", Ptr{Cvoid}[], length(col)
 
 # Strings, and anything without a native mapping, are exported as utf8.
-tostr(x::AbstractString) = x
-tostr(x) = string(x)
+tostr(x::AbstractString) = valid_utf8(x)
+tostr(x) = valid_utf8(string(x))
 
 function encode!(allocs, ::Type, col)
     total = 0
@@ -228,7 +228,7 @@ function export_column!(sch::Ptr{ArrowSchema}, arr::Ptr{ArrowArray}, name::Strin
                                       C_NULL, C_NULL, array_release_ptr(), private_block(aallocs)))
 
         f = cstring!(sallocs, fmt)
-        n = cstring!(sallocs, name)
+        n = cstring!(sallocs, String(valid_utf8(name)))
         unsafe_store!(sch, ArrowSchema(f, n, C_NULL, flags, 0, C_NULL, C_NULL,
                                        schema_release_ptr(), private_block(sallocs)))
     catch

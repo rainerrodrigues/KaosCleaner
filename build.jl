@@ -15,6 +15,9 @@ create_library(@__DIR__, OUT;
     lib_name="libkaoscleaner",
     precompile_execution_file=joinpath(@__DIR__, "build", "precompile.jl"),
     header_files=[joinpath(@__DIR__, "include", "kaoscleaner.h")],
+    # Adds kaos_init_julia, which makes the library safe to call from threads
+    julia_init_c_file=[PackageCompiler.default_julia_init(), joinpath(@__DIR__, "build", "kaos_init.c")],
+    julia_init_h_file=[PackageCompiler.default_julia_init_header()],
     # A single CPU target keeps compile memory low; the multi-target default
     # gets OOM-killed on ~8 GB machines. Use KAOS_CPU_TARGET=generic for a
     # library that must run on other CPUs.

@@ -129,16 +129,18 @@ def _load():
         os.add_dll_directory(str(lib_path.parent))  # the Julia DLLs sit next to it
 
     lib = ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
-    lib.init_julia.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
-    lib.init_julia.restype = None
+    lib.kaos_init_julia.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
+    lib.kaos_init_julia.restype = None
     lib.process_dataset.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.c_void_p]
     lib.process_dataset.restype = ctypes.c_int
     lib.kaos_last_error.argtypes = []
     lib.kaos_last_error.restype = ctypes.c_char_p
 
-    # Boot the Julia runtime once, before any other call into the library
+    # Boot the Julia runtime once, before any other call into the library.
+    # kaos_init_julia (not init_julia) leaves this thread GC-safe, so calls and
+    # Arrow release callbacks from other Python threads cannot deadlock.
     argv = (ctypes.c_char_p * 2)(b"kaoscleaner", None)
-    lib.init_julia(1, argv)
+    lib.kaos_init_julia(1, argv)
     _lib = lib
     return lib
 

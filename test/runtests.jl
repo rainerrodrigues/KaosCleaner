@@ -58,6 +58,28 @@ end
     @testset "normalize_name" begin
         @test KaosCleaner.normalize_name(" Bill Length (mm)") == "bill_length_mm"
         @test KaosCleaner.normalize_name("***") == "column"
+        @test KaosCleaner.normalize_name("caf\xe9") == "caf"  # U+FFFD is not a letter: dropped
+    end
+
+    @testset "duplicate_rows" begin
+        d = DataFrame(a=[1, 1, missing, missing, 2, 2], b=[NaN, NaN, missing, missing, -0.0, 0.0])
+        @test isequal(d[.!KaosCleaner.duplicate_rows(d), :], unique(d))  # same rules as unique!
+        # Hundreds of columns must not hit unique!'s minutes-long compile
+        wide = DataFrame(["c$i" => [i, i] for i in 1:1000])
+        elapsed = @elapsed out = clean_dataset(wide)
+        @test elapsed < 30
+        @test size(out) == (1, 1000)
+    end
+
+    @testset "invalid UTF-8 is replaced" begin
+        out = clean_dataset(DataFrame("n\xffme" => ["ok", "b\xfead", " \xff "]))
+        @test names(out) == ["n_me"]
+        @test out[!, 1] == ["ok", "b�ad", "�"]
+        @test all(isvalid, out[!, 1])
+        # The exporter guarantees valid utf8 even for uncleaned data
+        rc, back = export_and_read((s, a) -> (export_dataframe(DataFrame("x\xff" => ["a\xfeb"]), s, a); 0))
+        @test names(back) == ["x�"]
+        @test back[!, 1] == ["a�b"]
     end
 
     @testset "clean_dataset" begin

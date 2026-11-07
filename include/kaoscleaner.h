@@ -47,9 +47,19 @@ struct ArrowArray {
  * (one child per column) into the caller-allocated `out_schema`/`out_array`.
  * Returns 0 on success; on failure returns 1 and leaves both structs untouched.
  * On success the caller owns both structs and must call their `release`.
- * Call init_julia() (julia_init.h) once before the first call.
+ * Call kaos_init_julia() once before the first call.
  */
 int process_dataset(const char* filepath, struct ArrowSchema* out_schema, struct ArrowArray* out_array);
+
+/*
+ * Start the Julia runtime. Unlike init_julia() (julia_init.h), it leaves the
+ * calling thread GC-safe, so the library may then be called from any thread.
+ * Pass argc = 1 and argv = {"name", NULL}.
+ */
+void kaos_init_julia(int argc, char** argv);
+
+/* Stop the runtime; call from the thread that called kaos_init_julia(). */
+void kaos_shutdown_julia(int retcode);
 
 /* Message describing the last failure ("" after a success). Valid until the next call. */
 const char* kaos_last_error(void);
