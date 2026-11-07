@@ -61,6 +61,8 @@ jobs:
     env:
       # Don't tie the library to the CI runner's exact CPU
       KAOS_CPU_TARGET: generic
+      # Windows consoles default to cp1252, which cannot print Polars' tables
+      PYTHONUTF8: '1'
 
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +99,7 @@ jobs:
         run: |
           python -m pip install dist/*.whl
           cd "$RUNNER_TEMP" # import the installed package, not the checkout
-          python -c "import sys, kaos_cleaner; print(kaos_cleaner.clean_csv(sys.argv[1]))" "$GITHUB_WORKSPACE/test_set.csv"
+          python -c "import sys, kaos_cleaner; df = kaos_cleaner.clean_csv(sys.argv[1]); print(df.shape, df.columns)" "$GITHUB_WORKSPACE/test_set.csv"
 
       - name: Run the bridge tests against the installed wheel
         shell: bash
