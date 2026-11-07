@@ -34,6 +34,31 @@ for toml in (joinpath(csv.source, "Artifacts.toml"), joinpath(csv.source, "test"
                                 recursive=true, force=true)
 end
 
+# Ship the licenses of everything compiled or bundled into the library: Julia
+# (whose LICENSE.md also covers the libraries it bundles) and every package.
+licenses = joinpath(OUT, "share", "licenses")
+rm(licenses; recursive=true, force=true)
+mkpath(joinpath(licenses, "julia"))
+cp(joinpath(Sys.BINDIR, "..", "LICENSE.md"), joinpath(licenses, "julia", "LICENSE.md"); force=true)
+# Walk KaosCleaner's dependency tree; the build environment also holds
+# PackageCompiler, which is not part of the library.
+deps = Pkg.dependencies()
+bundled, todo = Set{Base.UUID}(), [only(u for (u, d) in deps if d.name == "KaosCleaner")]
+while !isempty(todo)
+    u = pop!(todo)
+    u in bundled || (push!(bundled, u); append!(todo, values(deps[u].dependencies)))
+end
+for u in bundled
+    dep = deps[u]
+    (dep.source === nothing || !isdir(dep.source)) && continue
+    for file in readdir(dep.source)
+        if occursin(r"^(licen[cs]e|copying)"i, file) && isfile(joinpath(dep.source, file))
+            mkpath(joinpath(licenses, dep.name))
+            cp(joinpath(dep.source, file), joinpath(licenses, dep.name, file); force=true)
+        end
+    end
+end
+
 # Drop DWARF debug info. Exported and function symbols stay, so crash traces
 # keep function names but lose source line numbers.
 if !Sys.iswindows() && Sys.which("strip") !== nothing

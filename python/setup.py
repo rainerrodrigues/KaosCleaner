@@ -1,3 +1,4 @@
+import os
 import platform
 
 from setuptools import setup
@@ -16,7 +17,8 @@ class PlatformWheel(bdist_wheel):
         # python.org macOS builds report universal2, but the runtime is single-arch
         if plat.startswith("macosx") and plat.endswith("universal2"):
             plat = plat[: -len("universal2")] + platform.machine()
-        return "py3", "none", plat
+        # scripts/build_wheel.py sets a manylinux tag derived from the runtime
+        return "py3", "none", os.environ.get("KAOS_WHEEL_PLAT") or plat
 
 
 setup(cmdclass={"bdist_wheel": PlatformWheel})

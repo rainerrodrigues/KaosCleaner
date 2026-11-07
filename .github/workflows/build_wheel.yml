@@ -76,3 +76,26 @@ jobs:
         with:
           name: kaos-cleaner-wheels
           path: dist/*.whl
+
+  # PyPI Trusted Publishing (OIDC): no API token is stored anywhere. Requires a
+  # (pending) publisher on PyPI for this repo, workflow file build_wheel.yml
+  # and environment "pypi", plus a GitHub environment named "pypi".
+  publish:
+    name: Publish to PyPI
+    needs: collect
+    if: startsWith(github.ref, 'refs/tags/v') # release tags only, not manual runs
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # lets the job prove to PyPI which repo/workflow it is
+      contents: read
+
+    steps:
+      - name: Download wheel set
+        uses: actions/download-artifact@v4
+        with:
+          name: kaos-cleaner-wheels
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
