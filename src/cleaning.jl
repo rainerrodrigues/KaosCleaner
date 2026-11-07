@@ -125,14 +125,9 @@ function clean_dataset!(df::DataFrame, opts::CleanOptions=CleanOptions())
     clean_strings!(df, Markers(opts.missing_values))
     opts.infer_types && infer_types!(df, opts)
 
-    # A row can only be entirely missing if every column allows missing values
-    if opts.drop_empty_rows && ncol(df) > 0 && all(col -> Missing <: eltype(col), eachcol(df))
-        empty_row = trues(nrow(df))
-        for col in eachcol(df)
-            empty_row .&= ismissing.(col)
-        end
-        n = count(empty_row)
-        n > 0 && (deleteat!(df, empty_row); @info "Dropped $n empty row$(n == 1 ? "" : "s")")
+    if opts.drop_empty_rows
+        n = drop_empty_rows!(df)
+        n > 0 && @info "Dropped $n empty row$(n == 1 ? "" : "s")"
     end
 
     if opts.dedupe
@@ -144,6 +139,19 @@ function clean_dataset!(df::DataFrame, opts::CleanOptions=CleanOptions())
     impute!(df, opts)
     disallowmissing!(df; error=false)
     return df
+end
+
+"Delete rows where every value is missing; returns how many were dropped."
+function drop_empty_rows!(df::DataFrame)
+    # A row can only be entirely missing if every column allows missing values
+    (ncol(df) > 0 && all(col -> Missing <: eltype(col), eachcol(df))) || return 0
+    empty_row = trues(nrow(df))
+    for col in eachcol(df)
+        empty_row .&= ismissing.(col)
+    end
+    n = count(empty_row)
+    n > 0 && deleteat!(df, empty_row)
+    return n
 end
 
 "Strip text cells and turn missing markers into `missing`, column by column."
@@ -208,9 +216,6 @@ function duplicate_rows(df::AbstractDataFrame; tasks::Integer=Threads.nthreads()
     end
     return BitVector(dup)
 end
-
-"Below this many rows, splitting work across tasks costs more than it saves."
-const PARALLEL_MIN_ROWS = 50_000
 
 # Mark duplicates among the rows whose hash falls in `group` (of `ngroups`).
 # Rows repeating an earlier row's hash are confirmed column by column in one

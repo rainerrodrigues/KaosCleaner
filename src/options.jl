@@ -18,7 +18,7 @@ Base.@kwdef struct CleanOptions
     drop_empty_rows::Bool = true
     "Convert text columns that hold booleans, dates or formatted numbers."
     infer_types::Bool = true
-    "Date formats (Dates.DateFormat syntax) to try first, e.g. \"dd/mm/yyyy\"."
+    "Date formats (Dates.DateFormat syntax), e.g. \"dd/mm/yyyy\"; when given, only these are tried."
     datetime_formats::Vector{String} = String[]
     "Fill missing values: one strategy for every column, or column => strategy."
     impute::Union{Nothing, String, Dict{String, String}} = nothing

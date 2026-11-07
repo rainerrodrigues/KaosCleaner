@@ -5,8 +5,8 @@
 #
 # Batches of a stream must share one schema, so column types and conversions
 # are decided once, from a sample at the start of the file, and later chunks
-# are made to fit them: values that do not fit become missing, with a logged
-# warning. Duplicates are found across the whole file through a 128-bit
+# are made to fit them: values that do not fit become missing, counted in a
+# logged warning. Duplicates are found across the whole file through a 128-bit
 # fingerprint per distinct row. Imputation is limited to strategies that need
 # no look-ahead (zero, ffill).
 
@@ -32,11 +32,21 @@ struct ColumnPlan
     out_type::Type                         # output element type (non-missing)
 end
 
+"The whole file as a single chunk, parsed when it is read (like CSV.Chunks)."
+struct WholeFile
+    path::String
+    kwargs::NamedTuple
+end
+Base.length(::WholeFile) = 1
+Base.iterate(w::WholeFile, i=1) = i > 1 ? nothing : (CSV.File(w.path; w.kwargs...), i + 1)
+
 mutable struct CleanStream
     plan::Vector{ColumnPlan}
     opts::CleanOptions
     markers::Markers
-    chunks::Union{CSV.Chunks, Vector{<:CSV.File}}  # iterate(chunks, i) -> (CSV.File, i + 1)
+    chunks::Union{CSV.Chunks, WholeFile}   # planned types, strict: iterate(chunks, i) -> (CSV.File, i + 1)
+    fallback::Union{CSV.Chunks, WholeFile, Nothing}  # same chunks, only text typed; made on first misfit
+    fallback_args::Tuple{String, Int, NamedTuple}    # (path, nchunks, kwargs) to make it
     next_chunk::Int
     seen::Union{Nothing, Set{Tuple{UInt, UInt}}}  # row fingerprints, for dedupe
     carry::Dict{String, Any}                      # last value per column, for ffill
@@ -97,11 +107,20 @@ function open_stream(path::AbstractString, opts::CleanOptions, chunk_bytes::Inte
     plan = stream_plan(path, opts)
     check_streaming_impute(plan, opts)
     nchunks = max(1, cld(filesize(path), chunk_bytes))
-    kwargs = (select=[p.source for p in plan], types=Dict(p.source => Union{Missing, p.parse_type} for p in plan),
-              missingstring=vcat(MISSING_STRINGS, opts.missing_values), stripwhitespace=true)
-    chunks = file_chunks(path, nchunks, kwargs)
+    # Chunks are parsed with the planned types in strict mode, which is fast
+    # and raises at the first value that does not fit (without strict, CSV.jl
+    # silently turns misfits into missings, reporting only the first 100). A
+    # chunk that raises is parsed again with only its text columns typed, and
+    # coerce_column then counts every misfit. Chunk boundaries do not depend
+    # on the types, so both parses split the file identically.
+    base = (select=[p.source for p in plan], missingstring=vcat(MISSING_STRINGS, opts.missing_values),
+            stripwhitespace=true)
+    typed = Dict(p.source => Union{Missing, p.parse_type} for p in plan)
+    text = Dict(p.source => Union{Missing, String} for p in plan if p.parse_type === String)
+    chunks = file_chunks(path, nchunks, (; base..., types=typed, strict=true))
     seen = opts.dedupe ? Set{Tuple{UInt, UInt}}() : nothing
-    return CleanStream(plan, opts, Markers(opts.missing_values), chunks, 1, seen, Dict{String, Any}(), 0, 0, 0, "")
+    return CleanStream(plan, opts, Markers(opts.missing_values), chunks, nothing,
+                       (String(path), nchunks, (; base..., types=text)), 1, seen, Dict{String, Any}(), 0, 0, 0, "")
 end
 
 """
@@ -112,20 +131,37 @@ CSV.jl only splits a file it would parse in parallel (more than one chunk and
 a file that is not small); anything else is read with a single `CSV.File`.
 """
 function file_chunks(path::AbstractString, nchunks::Integer, kwargs::NamedTuple)
-    single() = [CSV.File(path; kwargs...)]
-    nchunks == 1 && return single()
+    nchunks == 1 && return WholeFile(path, kwargs)
     try
         return CSV.Chunks(path; ntasks=nchunks, kwargs...)
     catch e
-        e isa ArgumentError && occursin("unable to iterate chunks", e.msg) && return single()
+        e isa ArgumentError && occursin("unable to iterate chunks", e.msg) && return WholeFile(path, kwargs)
         rethrow()
     end
 end
 
+"Chunk `i`, parsed again without fixed numeric types if a value does not fit them."
+function read_chunk(s::CleanStream, i::Int)
+    try
+        return iterate(s.chunks, i)
+    catch e
+        is_misfit(e) || rethrow()
+        s.fallback === nothing && (s.fallback = file_chunks(s.fallback_args...))
+        return iterate(s.fallback, i)
+    end
+end
+
+# A strict-mode parse error, possibly from one of the tasks CSV.jl parses a
+# whole file with (then wrapped in a TaskFailedException)
+is_misfit(e) = e isa CSV.Error ||
+               (e isa TaskFailedException && is_misfit(e.task.result)) ||
+               (e isa CompositeException && any(is_misfit, e.exceptions)) ||
+               (e isa CapturedException && is_misfit(e.ex))
+
 "The next cleaned, non-empty batch, or `nothing` at the end of the file."
 function next_batch!(s::CleanStream)
     while s.next_chunk <= length(s.chunks)
-        file, s.next_chunk = iterate(s.chunks, s.next_chunk)
+        file, s.next_chunk = read_chunk(s, s.next_chunk)
         df = clean_chunk!(s, DataFrame(file; copycols=false))
         if nrow(df) > 0
             s.rows += nrow(df)
@@ -147,25 +183,47 @@ function clean_chunk!(s::CleanStream, df::DataFrame)
     clean_strings!(df, s.markers)
     for p in s.plan
         col = df[!, p.name]
-        if p.conversion !== nothing
-            out, failures = apply_conversion(p.conversion, col)
-            failures > 0 && @warn "$failures value$(failures == 1 ? "" : "s") in `$(p.name)` did not fit $(nameof(p.out_type)) and became missing"
-            df[!, p.name] = out
-        elseif !fits(col, p.out_type)
-            df[!, p.name] = Vector{Union{Missing, p.out_type}}(col)
-        end
+        p.conversion === nothing && fits(col, p.out_type) && continue
+        out, failures = p.conversion === nothing ? coerce_column(col, p.out_type) : apply_conversion(p.conversion, col)
+        failures > 0 && @warn "$failures value$(failures == 1 ? "" : "s") in `$(p.name)` did not fit $(nameof(p.out_type)) and became missing"
+        df[!, p.name] = out
     end
-    if s.opts.drop_empty_rows
-        empty_row = trues(nrow(df))
-        for col in eachcol(df)
-            empty_row .&= ismissing.(col)
-        end
-        n = count(empty_row)
-        n > 0 && (deleteat!(df, empty_row); s.empty_rows += n)
-    end
+    s.opts.drop_empty_rows && (s.empty_rows += drop_empty_rows!(df))
     s.seen === nothing || (s.duplicates += drop_seen_rows!(df, s.seen))
     impute_stream!(s, df)
     return df
+end
+
+"""
+    coerce_column(col, T) -> (Vector{Union{Missing, T}}, failures)
+
+`col`, as CSV.jl inferred it for one chunk, converted to the planned element
+type `T`. Values that cannot be represented (text in a numeric column, a
+decimal in an integer column) become missing and are counted.
+"""
+function coerce_column(col::AbstractVector, ::Type{T}) where {T}
+    out = Vector{Union{Missing, T}}(undef, length(col))
+    failures = 0
+    for (i, x) in enumerate(col)
+        v = ismissing(x) ? missing : coerce_value(T, x)
+        v === nothing && (failures += 1; v = missing)
+        out[i] = v
+    end
+    return out, failures
+end
+
+function coerce_value(::Type{T}, x) where {T}
+    x isa T && return x
+    if x isa AbstractString
+        return T === String ? String(x) : tryparse(T, x)
+    elseif T <: Integer && x isa Real  # includes Bool: 0/1 columns
+        return isinteger(x) && typemin(T) <= x <= typemax(T) ? T(x) : nothing
+    elseif T <: AbstractFloat && x isa Real
+        return T(x)
+    elseif T === DateTime && x isa Date
+        return DateTime(x)
+    end
+    return nothing
 end
 
 "Drop rows whose fingerprint was seen in this or an earlier batch."
@@ -194,16 +252,9 @@ function impute_stream!(s::CleanStream, df::DataFrame)
         col = df[!, name]
         T = nonmissingtype(eltype(col))
         if strategy == "zero"
-            is_numeric(T) || continue  # global strategy: numeric columns only
-            df[!, name] = T[ismissing(x) ? zero(T) : x for x in col]
+            is_numeric(T) && (df[!, name] = fill_zero(col))  # global strategy: numeric columns only
         else  # ffill, carrying the last value over from the previous batch
-            last = get(s.carry, name, missing)
-            out = Vector{eltype(col)}(col)
-            for i in eachindex(out)
-                ismissing(out[i]) ? (out[i] = last) : (last = out[i])
-            end
-            s.carry[name] = last
-            df[!, name] = out
+            df[!, name], s.carry[name] = fill_forward(col, get(s.carry, name, missing))
         end
     end
 end
