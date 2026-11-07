@@ -5,6 +5,14 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.1.2 (2026-11-07)
+
+### Bug Fixes
+
+- Remove an invalid PyPI classifier
+  ([`7bac0f5`](https://github.com/rainerrodrigues/KaosCleaner/commit/7bac0f59fae0a9ef4fa23148b5bd61a3f46e19d7))
+
+
 ## v0.1.1 (2026-11-07)
 
 ### Bug Fixes
