@@ -6,9 +6,15 @@ name: Docs
 on:
   push:
     branches: [main]
-    paths: [docs/**, mkdocs.yml, python/kaos_cleaner/**, .github/workflows/docs.yml]
+    paths: [docs/**, mkdocs.yml, CHANGELOG.md, python/kaos_cleaner/**, .github/workflows/docs.yml]
   pull_request:
-    paths: [docs/**, mkdocs.yml, python/kaos_cleaner/**, .github/workflows/docs.yml]
+    paths: [docs/**, mkdocs.yml, CHANGELOG.md, python/kaos_cleaner/**, .github/workflows/docs.yml]
+  # The release bot's CHANGELOG commit is pushed with GITHUB_TOKEN, which does
+  # not trigger workflows; rebuild after each release run instead.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

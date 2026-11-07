@@ -4,16 +4,26 @@ site_url: https://rainerrodrigues.github.io/KaosCleaner/
 repo_url: https://github.com/rainerrodrigues/KaosCleaner
 repo_name: rainerrodrigues/KaosCleaner
 edit_uri: edit/main/docs/
+exclude_docs: requirements.txt  # the docs build's own pins, not a page
 
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
-  - Cleaning options: options.md
-  - Large files: large-files.md
-  - Logging: logging.md
-  - How it works: how-it-works.md
-  - Benchmarks: benchmarks.md
-  - API reference: api.md
+  - User guide:
+      - Getting started: getting-started.md
+      - Cleaning options: options.md
+      - Large files: large-files.md
+      - Logging: logging.md
+      - Recipes: recipes.md
+      - Troubleshooting: troubleshooting.md
+  - Reference:
+      - Python API: api.md
+      - C API: c-api.md
+  - Background:
+      - How it works: how-it-works.md
+      - Benchmarks: benchmarks.md
+  - Project:
+      - Development: development.md
+      - Changelog: changelog.md
 
 theme:
   name: material
@@ -53,6 +63,9 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.superfences
   - pymdownx.highlight
+  - pymdownx.snippets:
+      base_path: [.]   # lets changelog.md include CHANGELOG.md from the repo root
+      check_paths: true
   - tables
   - toc:
       permalink: true
