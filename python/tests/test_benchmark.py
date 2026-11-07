@@ -8,7 +8,6 @@ does the same cleaning as kaos_cleaner, so the comparison is like for like.
 """
 import random
 import re
-import statistics
 import time
 
 import pytest
@@ -68,27 +67,33 @@ def test_benchmark(benchmark, bench_csv, engine):
     assert len(result) == ROWS
 
 
-def _median_time(fn, path, runs=7):
+def _best_time(fn, path, runs=9):
+    """Fastest of `runs` timed calls after a warm-up.
+
+    Shared CI machines add large, one-sided delays (a descheduled thread holds
+    up a parallel step), which move a median around; the best time reflects
+    what the code can do, and a real slowdown still raises it.
+    """
     fn(path)  # warm up
     times = []
     for _ in range(runs):
         start = time.perf_counter()
         fn(path)
         times.append(time.perf_counter() - start)
-    return statistics.median(times)
+    return min(times)
 
 
-# Regression guard: on 100k rows kaos_cleaner measures ~1.95x the speed of the
-# equivalent pandas code on a 12-core machine (parallel parsing, deduplication
-# and export); GitHub's 4-core runners show less. 0.7x still fails if
+# Regression guard, on best times: on 100k rows kaos_cleaner measures ~1.95x
+# the speed of the equivalent pandas code on 12 threads, ~1.1x on 4 and ~0.85x
+# on 2 (parallel parsing, deduplication and export). 0.7x still fails if
 # threading or the cleaning fast paths stop working (one thread: ~0.6x).
 MIN_SPEEDUP_VS_PANDAS = 0.7
 
 
 def test_speed_vs_pandas(bench_csv):
     """Gate: fail if kaos_cleaner gets markedly slower relative to pandas."""
-    pandas_s = _median_time(pandas_clean, bench_csv)
-    kaos_s = _median_time(clean_csv, bench_csv)
+    pandas_s = _best_time(pandas_clean, bench_csv)
+    kaos_s = _best_time(clean_csv, bench_csv)
     speedup = pandas_s / kaos_s
     print(f"\npandas {pandas_s:.3f}s | kaos_cleaner {kaos_s:.3f}s | speedup {speedup:.2f}x")
     assert speedup >= MIN_SPEEDUP_VS_PANDAS, f"speedup over pandas dropped to {speedup:.2f}x"
