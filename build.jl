@@ -89,9 +89,14 @@ strip_exe = strip_command()
 if strip_exe !== nothing
     libdirs = Sys.iswindows() ? [joinpath(OUT, "bin")] : [joinpath(OUT, "lib"), joinpath(OUT, "lib", "julia")]
     shared = Sys.iswindows() ? r"\.dll$"i : r"\.so(\.|$)"  # libLLVM.so.18.1jl, libstdc++.so.6.0.33, ...
+    # Only real binaries: some ".so" files are linker scripts (text), e.g.
+    # libgcc_s.so in Julia 1.12.7
+    magic = Sys.iswindows() ? b"MZ" : b"\x7fELF"
     for dir in libdirs, file in readdir(dir; join=true)
         (islink(file) || !isfile(file) || !occursin(shared, basename(file))) && continue
-        run(`$strip_exe --strip-debug $file`)
+        open(io -> read(io, length(magic)), file) == magic || continue
+        # A size optimization only: never fail the build over one library
+        success(`$strip_exe --strip-debug $file`) || @warn "could not strip $file"
     end
 end
 
