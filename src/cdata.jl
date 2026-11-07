@@ -235,13 +235,14 @@ end
 # ---------------------------------------------------------------------------
 
 # Fill `sch`/`arr` for one column. On failure everything allocated is freed.
-function export_column!(sch::Ptr{ArrowSchema}, arr::Ptr{ArrowArray}, name::String, col::AbstractVector)
+function export_column!(sch::Ptr{ArrowSchema}, arr::Ptr{ArrowArray}, name::String, col::AbstractVector;
+                        nullable::Bool=false)
     sallocs = Ptr{Cvoid}[]
     aallocs = Ptr{Cvoid}[]
     try
         T = nonmissingtype(eltype(col))
         fmt, bufs, nulls = encode!(aallocs, T, col)
-        flags = (T === eltype(col) && T !== Union{}) ? Int64(0) : ARROW_FLAG_NULLABLE
+        flags = (!nullable && T === eltype(col) && T !== Union{}) ? Int64(0) : ARROW_FLAG_NULLABLE
 
         bufptr = Ptr{Ptr{Cvoid}}(cmalloc!(aallocs, length(bufs) * sizeof(Ptr{Cvoid})))
         for (i, b) in enumerate(bufs)
@@ -263,13 +264,16 @@ function export_column!(sch::Ptr{ArrowSchema}, arr::Ptr{ArrowArray}, name::Strin
 end
 
 """
-    export_dataframe(df, out_schema, out_array)
+    export_dataframe(df, out_schema, out_array; nullable=false)
 
 Export `df` through the Arrow C Data Interface into caller-allocated
 `ArrowSchema`/`ArrowArray` structs. Ownership passes to the caller, who must
-eventually call each struct's `release` callback.
+eventually call each struct's `release` callback. `nullable=true` marks every
+field nullable, so batches of a stream share one schema whether or not a
+given batch happens to contain missing values.
 """
-function export_dataframe(df::AbstractDataFrame, out_schema::Ptr{ArrowSchema}, out_array::Ptr{ArrowArray})
+function export_dataframe(df::AbstractDataFrame, out_schema::Ptr{ArrowSchema}, out_array::Ptr{ArrowArray};
+                          nullable::Bool=false)
     ncols = ncol(df)
     sallocs = Ptr{Cvoid}[]
     aallocs = Ptr{Cvoid}[]
@@ -282,7 +286,7 @@ function export_dataframe(df::AbstractDataFrame, out_schema::Ptr{ArrowSchema}, o
             ca = Ptr{ArrowArray}(cmalloc!(aallocs, sizeof(ArrowArray)))
             unsafe_store!(schildren, cs, i)
             unsafe_store!(achildren, ca, i)
-            export_column!(cs, ca, name, df[!, name])
+            export_column!(cs, ca, name, df[!, name]; nullable)
             done = i
         end
         buffers = Ptr{Ptr{Cvoid}}(cmalloc!(aallocs, sizeof(Ptr{Cvoid})))  # [validity = NULL]

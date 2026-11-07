@@ -38,6 +38,50 @@ for csv in csvs
     Libc.free(array)
 end
 
+# Options, type inference, imputation and log collection
+messy = joinpath(dirname(path), "trace_messy.csv")
+write(messy, """
+Paid,Amount,Day,Score,City
+Yes,"\$1,200.50",13/01/2024,1.5,A
+no,€3,02/02/2024,,
+Y,40,28/02/2024,3,A
+""")
+options = """{"drop": ["City"], "impute": {"score": "median"}, "missing_values": ["-"],
+              "datetime_formats": ["dd/mm/yyyy"]}"""
+for opts in (options, """{"impute": "ffill"}""", """{"impute": "mean"}""", """{"impute": "mode"}""")
+    schema = Libc.calloc(1, sizeof(ArrowSchema))
+    array = Libc.calloc(1, sizeof(ArrowArray))
+    rc = GC.@preserve messy opts KaosCleaner.process_dataset_with_options(
+        Base.unsafe_convert(Cstring, messy), Base.unsafe_convert(Cstring, opts), schema, array)
+    rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    KaosCleaner.release!(schema, array)
+    Libc.free(schema)
+    Libc.free(array)
+end
+unsafe_string(KaosCleaner.kaos_take_logs())
+
+# Streaming: open a stream over the big file in small chunks and drain it
+# through its C callbacks, as pyarrow does
+using KaosCleaner: ArrowArrayStream
+for opts in ("", """{"impute": "ffill"}""")
+    st = Ptr{ArrowArrayStream}(Libc.calloc(1, sizeof(ArrowArrayStream)))
+    rc = GC.@preserve big opts KaosCleaner.kaos_open_stream(
+        Base.unsafe_convert(Cstring, big), Base.unsafe_convert(Cstring, opts), Int64(256 * 1024), Ptr{Cvoid}(st))
+    rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    s = unsafe_load(st)
+    sch = Ptr{ArrowSchema}(Libc.calloc(1, sizeof(ArrowSchema)))
+    arr = Ptr{ArrowArray}(Libc.calloc(1, sizeof(ArrowArray)))
+    ccall(s.get_schema, Cint, (Ptr{ArrowArrayStream}, Ptr{ArrowSchema}), st, sch)
+    while ccall(s.get_next, Cint, (Ptr{ArrowArrayStream}, Ptr{ArrowArray}), st, arr) == 0
+        unsafe_load(arr).release == C_NULL && break
+        ccall(unsafe_load(arr).release, Cvoid, (Ptr{ArrowArray},), arr)
+    end
+    ccall(unsafe_load(sch).release, Cvoid, (Ptr{ArrowSchema},), sch)
+    ccall(s.release, Cvoid, (Ptr{ArrowArrayStream},), st)
+    foreach(Libc.free, (st, sch, arr))
+end
+unsafe_string(KaosCleaner.kaos_take_logs())
+
 # Error path
 GC.@preserve begin
     KaosCleaner.process_dataset(Base.unsafe_convert(Cstring, "dummy.csv"), C_NULL, C_NULL)

@@ -170,3 +170,73 @@ def test_memory_stays_flat(valid_csv):
 
     growth = _rss_mb() - baseline
     assert growth < 50, f"RSS grew by {growth:.1f} MB over 300 calls"
+
+
+# --- options, logging and streaming -----------------------------------------
+
+def test_options_reach_the_engine(messy_csv):
+    df = clean_csv(messy_csv, drop=["Customer ID"], impute={"spend_usd": "zero"}, dedupe=False)
+
+    assert df.columns == ["full_name", "spend_usd", "active"]
+    # duplicate Bob kept; the all-empty row and, without its id, row 3 are dropped
+    assert df["full_name"].to_list() == ["Alice", "Bob", "Bob"]
+    assert df["spend_usd"].null_count() == 0
+
+
+def test_type_inference_from_python(tmp_path):
+    path = tmp_path / "typed.csv"
+    path.write_text("Paid,Amount,Day\nYes,\"$1,200.50\",13/01/2024\nno,€3,02/02/2024\n")
+    df = clean_csv(str(path))
+
+    assert df.schema == {"paid": pl.Boolean, "amount": pl.Float64, "day": pl.Date}
+
+
+def test_option_typo_is_a_type_error(valid_csv):
+    with pytest.raises(TypeError):
+        clean_csv(valid_csv, dorp=["id"])
+    with pytest.raises(TypeError):
+        kaos_cleaner.iter_clean_csv(valid_csv, dorp=["id"])
+
+
+def test_invalid_option_value_raises(valid_csv):
+    with pytest.raises(RuntimeError, match="unknown impute strategy"):
+        clean_csv(valid_csv, impute="avg")
+    with pytest.raises(RuntimeError, match="no column named"):
+        clean_csv(valid_csv, drop=["nope"])
+
+
+def test_engine_logs_reach_python_logging(messy_csv, caplog):
+    with caplog.at_level("INFO", logger="kaos_cleaner"):
+        clean_csv(messy_csv)
+    messages = [r.getMessage() for r in caplog.records if r.name == "kaos_cleaner"]
+    assert "Dropped 1 empty row" in messages
+    assert "Dropped 1 duplicate row" in messages
+
+
+def test_streaming_matches_in_memory(valid_csv):
+    reader = kaos_cleaner.iter_clean_csv(valid_csv, chunk_size=16 * 1024)
+    batches = list(reader)
+
+    assert len(batches) > 1  # really chunked
+    streamed = pl.from_arrow(pa.Table.from_batches(batches))
+    assert streamed.equals(clean_csv(valid_csv))
+
+
+def test_streaming_to_parquet(valid_csv, tmp_path):
+    out = tmp_path / "out.parquet"
+    rows = kaos_cleaner.clean_csv_to_parquet(valid_csv, str(out), chunk_size=16 * 1024)
+
+    assert rows == 10_000
+    assert pl.read_parquet(out)["id"].to_list() == list(range(10_000))
+
+
+def test_streaming_rejects_whole_file_imputation(valid_csv):
+    with pytest.raises(RuntimeError, match="needs the whole file"):
+        kaos_cleaner.iter_clean_csv(valid_csv, impute="median")
+
+
+def test_abandoned_stream_is_released(valid_csv):
+    reader = kaos_cleaner.iter_clean_csv(valid_csv, chunk_size=16 * 1024)
+    next(iter(reader))
+    del reader  # dropping a half-read stream must free it without crashing
+    assert clean_csv(valid_csv).height == 10_000

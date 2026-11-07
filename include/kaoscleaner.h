@@ -61,8 +61,23 @@ void kaos_init_julia(int argc, char** argv);
 /* Stop the runtime; call from the thread that called kaos_init_julia(). */
 void kaos_shutdown_julia(int retcode);
 
+/*
+ * process_dataset with cleaning options as a JSON object, e.g.
+ * {"drop": ["id"], "impute": "median", "datetime_formats": ["dd/mm/yyyy"]}.
+ * Unknown or invalid options fail with a message in kaos_last_error().
+ * Pass NULL or "" for the defaults.
+ */
+int process_dataset_with_options(const char* filepath, const char* options_json,
+                                 struct ArrowSchema* out_schema, struct ArrowArray* out_array);
+
 /* Message describing the last failure ("" after a success). Valid until the next call. */
 const char* kaos_last_error(void);
+
+/*
+ * Log records since the last call, as a JSON array of [level, message] with
+ * Julia levels (Info 0, Warn 1000, Error 2000). Valid until the next call.
+ */
+const char* kaos_take_logs(void);
 
 #ifdef __cplusplus
 }

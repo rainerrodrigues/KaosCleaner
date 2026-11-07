@@ -4,13 +4,14 @@
 const MISSING_STRINGS = ["", "NA", "N/A", "n/a", "na", "NaN", "nan", "null", "NULL", "None", "none"]
 
 """
-    load_dataset(path) -> DataFrame
+    load_dataset(path; missing_values=String[]) -> DataFrame
 
-Read a delimited file, mapping common missing-value markers to `missing`.
+Read a delimited file, mapping common missing-value markers (plus
+`missing_values`) to `missing`.
 """
-function load_dataset(path::AbstractString)
+function load_dataset(path::AbstractString; missing_values::Vector{String}=String[])
     isfile(path) || throw(ArgumentError("file not found: $path"))
-    return CSV.read(path, DataFrame; missingstring=MISSING_STRINGS, stripwhitespace=true)
+    return CSV.read(path, DataFrame; missingstring=vcat(MISSING_STRINGS, missing_values), stripwhitespace=true)
 end
 
 """
@@ -33,14 +34,20 @@ function normalize_name(name::AbstractString)
     return isempty(s) ? "column" : String(s)
 end
 
-const MAX_MISSING_LENGTH = maximum(ncodeunits, MISSING_STRINGS)
+"The cell values treated as missing, with their longest length for a cheap pre-check."
+struct Markers
+    values::Vector{String}
+    max_length::Int
+end
+Markers(extra::Vector{String}=String[]) =
+    (v = unique(vcat(MISSING_STRINGS, extra)); Markers(v, maximum(ncodeunits, v)))
 
-is_missing_marker(s) = ncodeunits(s) <= MAX_MISSING_LENGTH && s in MISSING_STRINGS
+is_missing_marker(s, m::Markers) = ncodeunits(s) <= m.max_length && s in m.values
 
-function clean_string(x)
+function clean_string(x, m::Markers=Markers())
     ismissing(x) && return missing
     s = strip(valid_utf8(x))
-    return is_missing_marker(s) ? missing : String(s)
+    return is_missing_marker(s, m) ? missing : String(s)
 end
 
 # Whether clean_string would change `x`. For CSV input the parser has already
@@ -82,56 +89,91 @@ for (S, U) in INLINE_INTS
     end
 end
 
-function needs_cleaning(x)
+function needs_cleaning(x, m::Markers=Markers())
     ismissing(x) && return false
     n, ascii, first_byte, last_byte = byte_summary(x)
     n == 0 && return true
-    ascii && return is_ascii_space(first_byte) || is_ascii_space(last_byte) || is_missing_marker(x)
-    return !isvalid(x) || isspace(first(x)) || isspace(last(x)) || is_missing_marker(x)
+    ascii && return is_ascii_space(first_byte) || is_ascii_space(last_byte) || is_missing_marker(x, m)
+    return !isvalid(x) || isspace(first(x)) || isspace(last(x)) || is_missing_marker(x, m)
 end
 
 """
-    clean_dataset(df) -> DataFrame
+    clean_dataset(df, opts=CleanOptions()) -> DataFrame
 
-Return a cleaned copy of `df`:
+Return a cleaned copy of `df`. With the default options:
 1. column names normalised to unique snake_case,
 2. string cells stripped, with missing markers turned into `missing`,
-3. rows where every value is missing dropped,
-4. duplicate rows dropped,
-5. columns that no longer contain missings narrowed to non-missing types.
+3. text columns holding booleans, dates or formatted numbers converted,
+4. rows where every value is missing dropped,
+5. duplicate rows dropped,
+6. columns that no longer contain missings narrowed to non-missing types.
+Columns can be dropped or kept and missing values imputed; see `CleanOptions`.
 """
-clean_dataset(df::AbstractDataFrame) = clean_dataset!(DataFrame(df; copycols=true))
+clean_dataset(df::AbstractDataFrame, opts::CleanOptions=CleanOptions()) =
+    clean_dataset!(DataFrame(df; copycols=true), opts)
 
 """
-    clean_dataset!(df) -> df
+    clean_dataset!(df, opts=CleanOptions()) -> df
 
 [`clean_dataset`](@ref) in place, for a DataFrame whose columns the caller
 owns, such as one fresh from [`load_dataset`](@ref). Saves copying every column.
 """
-function clean_dataset!(df::DataFrame)
-    rename!(df, normalize_name.(names(df)); makeunique=true)
+function clean_dataset!(df::DataFrame, opts::CleanOptions=CleanOptions())
+    opts.rename && rename!(df, normalize_name.(names(df)); makeunique=true)
+    select_columns!(df, opts)
 
-    for name in names(df)
-        col = df[!, name]
-        T = nonmissingtype(eltype(col))
-        # T === Union{}: an all-missing column, kept as a nullable string column
-        if T <: AbstractString && (T === Union{} || any(needs_cleaning, col))
-            df[!, name] = Union{Missing, String}[clean_string(x) for x in col]
-        end
-    end
+    clean_strings!(df, Markers(opts.missing_values))
+    opts.infer_types && infer_types!(df, opts)
 
     # A row can only be entirely missing if every column allows missing values
-    if ncol(df) > 0 && all(col -> Missing <: eltype(col), eachcol(df))
+    if opts.drop_empty_rows && ncol(df) > 0 && all(col -> Missing <: eltype(col), eachcol(df))
         empty_row = trues(nrow(df))
         for col in eachcol(df)
             empty_row .&= ismissing.(col)
         end
-        any(empty_row) && deleteat!(df, empty_row)
+        n = count(empty_row)
+        n > 0 && (deleteat!(df, empty_row); @info "Dropped $n empty row$(n == 1 ? "" : "s")")
     end
 
-    dup = duplicate_rows(df)
-    any(dup) && deleteat!(df, dup)
+    if opts.dedupe
+        dup = duplicate_rows(df)
+        n = count(dup)
+        n > 0 && (deleteat!(df, dup); @info "Dropped $n duplicate row$(n == 1 ? "" : "s")")
+    end
+
+    impute!(df, opts)
     disallowmissing!(df; error=false)
+    return df
+end
+
+"Strip text cells and turn missing markers into `missing`, column by column."
+function clean_strings!(df::DataFrame, markers::Markers)
+    for name in names(df)
+        col = df[!, name]
+        T = nonmissingtype(eltype(col))
+        # T === Union{}: an all-missing column, kept as a nullable string column
+        if T <: AbstractString && (T === Union{} || any(x -> needs_cleaning(x, markers), col))
+            df[!, name] = Union{Missing, String}[clean_string(x, markers) for x in col]
+        end
+    end
+    return df
+end
+
+"""
+    select_columns!(df, opts)
+
+Apply `opts.drop` and `opts.keep`. Names may be given as in the file or in
+their snake_case form; unknown names are an error rather than a silent no-op.
+"""
+function select_columns!(df::DataFrame, opts::CleanOptions)
+    resolve(user) = begin
+        user in names(df) && return user
+        n = normalize_name(user)
+        opts.rename && n in names(df) && return n
+        throw(ArgumentError("no column named $(repr(user)); columns are: $(join(names(df), ", "))"))
+    end
+    opts.keep === nothing || select!(df, unique(resolve.(opts.keep)))
+    isempty(opts.drop) || select!(df, Not(unique(resolve.(opts.drop))))
     return df
 end
 
