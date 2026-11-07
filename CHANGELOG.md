@@ -5,6 +5,19 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.1.3 (2026-11-07)
+
+### Documentation
+
+- Benchmark script and results at 100k, 1M and 10M rows
+  ([`1972aa5`](https://github.com/rainerrodrigues/KaosCleaner/commit/1972aa5f31113cb65dbab4d4abdaaa09250464e7))
+
+### Performance Improvements
+
+- Parallel duplicate detection and Arrow export, leaner type inference
+  ([`443f37e`](https://github.com/rainerrodrigues/KaosCleaner/commit/443f37e37cc9450b4e034712fc3bc35a9175067f))
+
+
 ## v0.1.2 (2026-11-07)
 
 ### Bug Fixes
