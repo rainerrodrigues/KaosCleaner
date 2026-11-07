@@ -2,9 +2,12 @@ name: Release
 
 # Every push to main asks python-semantic-release whether the Conventional
 # Commits since the last tag warrant a release (fix: / feat: / BREAKING
-# CHANGE). If so it bumps the version, updates CHANGELOG.md, tags vX.Y.Z and
-# the wheels are built from that tag and published. Otherwise nothing is built.
-# A manual run builds test wheels from main even without a release.
+# CHANGE). If so it bumps the version, updates CHANGELOG.md, tags vX.Y.Z,
+# builds the wheels from that tag and attaches them to the GitHub release.
+# Uploads to TestPyPI and PyPI also need the repository variable
+# PUBLISH_TO_PYPI=true (Settings > Secrets and variables > Actions).
+# A manual run builds and tests wheels without releasing; on a branch other
+# than main it skips the release step entirely.
 on:
   push:
     branches: [main]
@@ -17,6 +20,7 @@ concurrency:
 jobs:
   release:
     name: Semantic release
+    if: github.ref == 'refs/heads/main' # releases only ever come from main
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the version commit and tag, create the GitHub release
@@ -46,7 +50,9 @@ jobs:
   wheel:
     name: Wheel (${{ matrix.os }})
     needs: release
-    if: needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled() && needs.release.result != 'failure' &&
+      (needs.release.outputs.released == 'true' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
       matrix:
@@ -109,6 +115,7 @@ jobs:
 
   collect:
     needs: wheel
+    if: ${{ !cancelled() && needs.wheel.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all wheels
@@ -124,6 +131,26 @@ jobs:
           name: kaos-cleaner-wheels
           path: dist/*.whl
 
+  release-assets:
+    name: Attach wheels to the GitHub release
+    needs: [release, collect]
+    if: ${{ !cancelled() && needs.release.outputs.released == 'true' && needs.collect.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download wheel set
+        uses: actions/download-artifact@v4
+        with:
+          name: kaos-cleaner-wheels
+          path: dist
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release upload "$TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --clobber
+
   # Trusted Publishing (OIDC): no API token is stored anywhere. Each index
   # needs a (pending) publisher for this repo and workflow build_wheel.yml,
   # with environment "testpypi" or "pypi", and a GitHub environment of the
@@ -131,7 +158,9 @@ jobs:
   publish-testpypi:
     name: Publish to TestPyPI
     needs: [release, collect]
-    if: needs.release.outputs.released == 'true' # not for manual test builds
+    if: >-
+      !cancelled() && needs.release.outputs.released == 'true' &&
+      needs.collect.result == 'success' && vars.PUBLISH_TO_PYPI == 'true'
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -154,7 +183,9 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: [release, publish-testpypi]
-    if: needs.release.outputs.released == 'true'
+    if: >-
+      !cancelled() && needs.release.outputs.released == 'true' &&
+      needs.publish-testpypi.result == 'success' && vars.PUBLISH_TO_PYPI == 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

@@ -46,8 +46,23 @@ On each push to `main`, `.github/workflows/build_wheel.yml` runs
 python-semantic-release (`releaserc.toml`). If a release is due, it bumps the
 version in `Project.toml` and `python/kaos_cleaner/__init__.py`, updates
 `CHANGELOG.md`, tags `vX.Y.Z`, creates a GitHub release, builds and tests one
-wheel per OS from that tag, and publishes them to TestPyPI and then PyPI via
-Trusted Publishing. Only wheels are published, never an sdist.
+wheel per OS from that tag and attaches the wheels to the release. Only wheels
+are published, never an sdist.
+
+Uploads to TestPyPI and then PyPI (Trusted Publishing, approved through the
+`pypi` environment) additionally need the repository variable
+`PUBLISH_TO_PYPI` set to `true`:
+
+```bash
+gh variable set PUBLISH_TO_PYPI --body true
+```
+
+Set it once PyPI has raised the project's file size limit (the wheels are
+over the 100 MB default) and pending publishers exist on test.pypi.org and
+pypi.org for workflow `build_wheel.yml` with environments `testpypi` / `pypi`.
+
+To test the wheel builds without releasing, run the workflow manually on any
+branch: `gh workflow run build_wheel.yml --ref <branch>`.
 
 There are no tags yet, so the first release counts from 0.0.0: make it a
 `feat:` commit to release 0.1.0 (a `fix:` would give 0.0.1).
