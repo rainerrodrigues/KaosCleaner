@@ -96,7 +96,12 @@ int process_dataset_with_options(const char* filepath, const char* options_json,
 int kaos_open_stream(const char* filepath, const char* options_json, int64_t chunk_bytes,
                      struct ArrowArrayStream* out_stream);
 
-/* Message describing the last failure ("" after a success). Valid until the next call. */
+/*
+ * Message describing the last failure ("" after a success). Valid until the
+ * next call. The message and the log buffer below are shared by the whole
+ * process: if several threads call the library and read them, serialize the
+ * calls (the Python package does), or one thread may read another's message.
+ */
 const char* kaos_last_error(void);
 
 /*

@@ -21,8 +21,9 @@
 | `src/streaming.jl` | Chunked processing and the Arrow C Stream Interface |
 | `build.jl`, `build/` | Engine build: PackageCompiler environment, precompile trace, thread-safe init (`kaos_init.c`) |
 | `include/kaoscleaner.h` | C API |
-| `python/kaos_cleaner/` | Python package |
+| `python/kaos_cleaner/` | Python package: `__init__.py` (public API), `_runtime.py` (finding, unpacking and loading the engine) |
 | `scripts/build_wheel.py` | Packs a build into a platform wheel |
+| `scripts/benchmark.py` | Times pandas, Polars and kaos-cleaner on generated data |
 | `test/`, `python/tests/` | Julia and Python tests |
 | `docs/`, `mkdocs.yml` | This site |
 
@@ -125,3 +126,11 @@ Merging to `main` is releasing. `build_wheel.yml`:
 Publishing uses Trusted Publishing: each index needs a publisher for this
 repository, workflow `build_wheel.yml` and environment `testpypi` or `pypi`.
 No tokens are stored.
+
+PyPI enforces two things only at upload time, so both are checked earlier:
+
+- **File size**: each wheel must stay under PyPI's 100 MiB per-file limit.
+  `build.jl` strips debug information from the bundled Julia libraries to
+  get there (Linux ~81 MiB, Windows ~74 MiB, macOS ~68 MiB).
+- **Classifiers**: every classifier in `python/pyproject.toml` must be on
+  PyPI's official list; `python/tests/test_metadata.py` checks this in CI.

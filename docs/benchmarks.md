@@ -50,26 +50,27 @@ On machines with fewer cores, expect numbers between the two columns.
 
 ## Larger than memory
 
-A 491 MB file with 10 million rows, cleaned in memory versus streamed to
-Parquet in 64 MB chunks:
+The 10-million-row file from the table above (505 MB), cleaned in memory
+versus streamed to Parquet in 64 MB chunks. Times exclude engine start-up.
 
 | Mode | Time | Peak RSS |
 |---|---:|---:|
-| `clean_csv` (in memory) | 9.5 s | 2,264 MB |
-| `clean_csv_to_parquet` | 15.7 s | 1,752 MB |
-| `clean_csv_to_parquet(..., dedupe=False)` | 13.9 s | 1,421 MB |
+| `clean_csv` (in memory) | 4.6 s | 2,272 MB |
+| `clean_csv_to_parquet` | 15.4 s | 2,190 MB |
+| `clean_csv_to_parquet(..., dedupe=False)` | 12.7 s | 1,784 MB |
 
 Reading the numbers:
 
-- In memory, peak usage is about 4.6 times the file size, so a 16 GB file
-  would need around 70 GB. Streaming does not grow that way.
-- About 600 MB of every number is the engine's runtime.
+- In memory, peak usage is about 4.5 times the file size, so a 16 GB file
+  would need around 70 GB. Streaming does not grow with the file that way.
+- About 500 MB of every number is the engine's runtime.
 - Streaming RSS includes pages of the memory-mapped input file. They count
   while there is free memory and are given back by the OS under pressure, so
-  on a file far larger than RAM the streaming peak stays bounded.
-- Deduplicating across the whole file costs about 33 bytes per distinct row
-  (here 330 MB for 10 million rows). Turn it off with `dedupe=False` if that
-  matters more than duplicates.
+  on a file far larger than RAM the streaming peak stays bounded. On a file
+  that fits in memory, as here, streaming saves little.
+- Deduplicating across the whole file costs about 40 bytes per distinct row
+  (here roughly 400 MB for 10 million rows). Turn it off with
+  `dedupe=False` if that matters more than duplicates.
 - Streaming is slower: chunks are parsed one at a time rather than with all
   threads on the whole file.
 

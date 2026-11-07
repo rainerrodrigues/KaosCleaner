@@ -49,6 +49,12 @@ Functions returning `int` return 0 on success and 1 on failure. Strings
 returned by the library stay valid until the next call into it; copy them if
 you need them longer.
 
+The cleaning functions may be called from any thread, but the error message
+and the log buffer are shared by the whole process. If several threads call
+the library and read `kaos_last_error` or `kaos_take_logs`, serialize those
+calls with a lock, as the Python package does; otherwise one thread can read
+another thread's message.
+
 `options_json` is a JSON object with the keys described in
 [Cleaning options](options.md), for example
 `{"drop": ["id"], "impute": "median"}`. `NULL` or `""` means defaults.
