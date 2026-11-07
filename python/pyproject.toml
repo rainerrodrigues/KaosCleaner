@@ -14,7 +14,7 @@ dependencies = ["pyarrow>=14", "polars>=0.20", "cffi"]
 packages = ["kaos_cleaner", "kaos_cleaner.runtime"]
 
 [tool.setuptools.package-data]
-"kaos_cleaner.runtime" = ["*.tar.gz"]
+"kaos_cleaner.runtime" = ["*.tar.xz", "*.tar.gz"]
 
 [tool.setuptools.dynamic]
 version = { attr = "kaos_cleaner.__version__" }

@@ -25,7 +25,7 @@ __version__ = "0.1.0"
 __all__ = ["clean_csv", "process_dataset"]
 
 _PKG_DIR = Path(__file__).resolve().parent
-_ARCHIVE = _PKG_DIR / "runtime" / "kaos_runtime.tar.gz"
+_ARCHIVES = [_PKG_DIR / "runtime" / f"kaos_runtime.tar.{ext}" for ext in ("xz", "gz")]
 
 _lib = None
 _lock = threading.Lock()
@@ -112,8 +112,9 @@ def _runtime_dir() -> Path:
     checkout = _PKG_DIR.parent.parent
     if (checkout / "build.jl").exists() and (checkout / "kaos_binaries").exists():
         return checkout / "kaos_binaries"
-    if _ARCHIVE.exists():
-        return _unpack_runtime(_ARCHIVE)
+    archive = next((a for a in _ARCHIVES if a.exists()), None)
+    if archive is not None:
+        return _unpack_runtime(archive)
     raise OSError("KaosCleaner runtime not found; set KAOSCLEANER_HOME to a kaos_binaries directory")
 
 

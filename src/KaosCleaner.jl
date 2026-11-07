@@ -20,6 +20,16 @@ Interface into the caller-allocated `ArrowSchema`/`ArrowArray` structs.
 Returns 0 on success and 1 on failure (see `kaos_last_error`).
 """
 function process_dataset(filepath::AbstractString, out_schema::Ptr, out_array::Ptr)::Cint
+    status = _process_dataset(filepath, out_schema, out_array)
+    # The exported buffers live outside the Julia heap, so everything Julia
+    # allocated for this file is garbage now. Collect it before handing control
+    # back: left to its own heuristics, the GC keeps hundreds of MB of dead
+    # DataFrames around between calls (~5% slower, much flatter memory).
+    GC.gc(false)
+    return status
+end
+
+function _process_dataset(filepath::AbstractString, out_schema::Ptr, out_array::Ptr)::Cint
     try
         df = clean_dataset(load_dataset(filepath))
         (out_schema == C_NULL || out_array == C_NULL) &&
