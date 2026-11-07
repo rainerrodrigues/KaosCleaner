@@ -237,6 +237,19 @@ def test_streaming_with_default_chunk_size(valid_csv, tmp_path):
     assert sum(b.num_rows for b in kaos_cleaner.iter_clean_csv(valid_csv)) == 10_000
 
 
+def test_streaming_counts_values_that_do_not_fit(tmp_path, caplog):
+    """Values after the 20,000-row sample that misfit become null, all counted."""
+    path = tmp_path / "misfit.csv"
+    rows = "".join(f"{i if i <= 20_000 else f'{i}.5'},x{i}\n" for i in range(1, 20_501))
+    path.write_text("n,label\n" + rows)
+    with caplog.at_level("WARNING", logger="kaos_cleaner"):
+        table = pa.Table.from_batches(list(kaos_cleaner.iter_clean_csv(str(path))))
+
+    assert table.num_rows == 20_500
+    assert table.column("n").null_count == 500
+    assert any("500 values in `n` did not fit Int64" in r.getMessage() for r in caplog.records)
+
+
 def test_streaming_rejects_whole_file_imputation(valid_csv):
     with pytest.raises(RuntimeError, match="needs the whole file"):
         kaos_cleaner.iter_clean_csv(valid_csv, impute="median")
