@@ -1,0 +1,30 @@
+# python-semantic-release: on each push to main, derives the next version from
+# Conventional Commit messages since the last tag (fix: -> patch, feat: ->
+# minor, BREAKING CHANGE -> minor while below 1.0), updates the files below,
+# commits, tags vX.Y.Z and creates a GitHub release. See build_wheel.yml.
+
+[semantic_release]
+commit_parser = "conventional"
+tag_format = "v{version}"
+allow_zero_version = true
+major_on_zero = false # breaking changes bump 0.x -> 0.(x+1) until a deliberate 1.0
+commit_message = "chore(release): v{version}"
+commit_author = { env = "GIT_COMMIT_AUTHOR", default = "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" }
+# Keep the Julia package and the Python package on the same version
+version_toml = ["Project.toml:version"]
+version_variables = ["python/kaos_cleaner/__init__.py:__version__"]
+
+[semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[semantic_release.changelog]
+# Keep internal maintenance out of the release notes
+exclude_commit_patterns = ["^chore", "^ci", "^style", "^test"]
+
+[semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+
+[semantic_release.remote]
+type = "github"
+token = { env = "GH_TOKEN" }

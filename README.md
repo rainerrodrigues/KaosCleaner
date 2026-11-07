@@ -32,12 +32,25 @@ that must run on other machines (CI does this).
 
 ## Releasing
 
-Push a `vX.Y.Z` tag. The workflow builds one wheel per OS and collects them
-in the `kaos-cleaner-wheels` artifact. Upload those wheels (not an sdist) with:
+Releases are automatic. Write commit messages (or squash-merge PR titles) as
+[Conventional Commits](https://www.conventionalcommits.org/):
 
-```bash
-python -m twine upload dist/*.whl
-```
+| Message | Effect |
+|---|---|
+| `fix: ...` | patch release (0.1.0 → 0.1.1) |
+| `feat: ...` | minor release (0.1.0 → 0.2.0) |
+| `BREAKING CHANGE:` in the body | minor while below 1.0, major after |
+| `docs:`, `test:`, `ci:`, `chore:`, ... | no release |
+
+On each push to `main`, `.github/workflows/build_wheel.yml` runs
+python-semantic-release (`releaserc.toml`). If a release is due, it bumps the
+version in `Project.toml` and `python/kaos_cleaner/__init__.py`, updates
+`CHANGELOG.md`, tags `vX.Y.Z`, creates a GitHub release, builds and tests one
+wheel per OS from that tag, and publishes them to TestPyPI and then PyPI via
+Trusted Publishing. Only wheels are published, never an sdist.
+
+There are no tags yet, so the first release counts from 0.0.0: make it a
+`feat:` commit to release 0.1.0 (a `fix:` would give 0.0.1).
 
 ## License
 

@@ -1,0 +1,47 @@
+name: CI
+
+# Checks every pull request before it can reach main (and so a release):
+# Julia tests, a Linux build of libkaoscleaner, then the Python bridge tests
+# and the speed gate against pandas, all on the same runner.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: julia-actions/cache@v2
+
+      - name: Julia tests
+        run: julia --project=. -e "using Pkg; Pkg.instantiate(); Pkg.test()"
+
+      - name: Compile libkaoscleaner
+        run: julia build.jl
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python test dependencies
+        run: python -m pip install pyarrow polars cffi pytest pytest-benchmark pandas
+
+      - name: Bridge tests and benchmarks
+        run: >
+          python -m pytest python/tests -v -p no:cacheprovider
+          --benchmark-columns=min,mean,stddev --benchmark-json=benchmark.json
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark.json
+          if-no-files-found: ignore
