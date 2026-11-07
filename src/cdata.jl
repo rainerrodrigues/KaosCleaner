@@ -273,21 +273,35 @@ field nullable, so batches of a stream share one schema whether or not a
 given batch happens to contain missing values.
 """
 function export_dataframe(df::AbstractDataFrame, out_schema::Ptr{ArrowSchema}, out_array::Ptr{ArrowArray};
-                          nullable::Bool=false)
+                          nullable::Bool=false, parallel::Bool=nrow(df) >= PARALLEL_MIN_ROWS)
     ncols = ncol(df)
     sallocs = Ptr{Cvoid}[]
     aallocs = Ptr{Cvoid}[]
     schildren = Ptr{Ptr{ArrowSchema}}(cmalloc!(sallocs, ncols * sizeof(Ptr{Cvoid})))
     achildren = Ptr{Ptr{ArrowArray}}(cmalloc!(aallocs, ncols * sizeof(Ptr{Cvoid})))
-    done = 0
+    exported = zeros(Bool, ncols)  # which children own their buffers (freed on failure)
     try
-        for (i, name) in enumerate(names(df))
-            cs = Ptr{ArrowSchema}(cmalloc!(sallocs, sizeof(ArrowSchema)))
-            ca = Ptr{ArrowArray}(cmalloc!(aallocs, sizeof(ArrowArray)))
-            unsafe_store!(schildren, cs, i)
-            unsafe_store!(achildren, ca, i)
-            export_column!(cs, ca, name, df[!, name]; nullable)
-            done = i
+        # The parent's allocation lists are only touched here, on one task
+        for i in 1:ncols
+            unsafe_store!(schildren, Ptr{ArrowSchema}(cmalloc!(sallocs, sizeof(ArrowSchema))), i)
+            unsafe_store!(achildren, Ptr{ArrowArray}(cmalloc!(aallocs, sizeof(ArrowArray))), i)
+        end
+        # Columns are independent (each export_column! has its own allocations),
+        # so large tables export them concurrently
+        export_one(i) = (export_column!(unsafe_load(schildren, i), unsafe_load(achildren, i),
+                                        names(df)[i], df[!, i]; nullable); exported[i] = true)
+        if parallel && ncols > 1
+            failures, failures_lock = Any[], ReentrantLock()
+            @sync for i in 1:ncols
+                Threads.@spawn try
+                    export_one(i)
+                catch e  # @sync waits for every task; failures are checked below
+                    lock(() -> push!(failures, e), failures_lock)
+                end
+            end
+            isempty(failures) || throw(first(failures))
+        else
+            foreach(export_one, 1:ncols)
         end
         buffers = Ptr{Ptr{Cvoid}}(cmalloc!(aallocs, sizeof(Ptr{Cvoid})))  # [validity = NULL]
         f = cstring!(sallocs, "+s")
@@ -297,7 +311,8 @@ function export_dataframe(df::AbstractDataFrame, out_schema::Ptr{ArrowSchema}, o
         unsafe_store!(out_schema, ArrowSchema(f, n, C_NULL, 0, ncols, schildren, C_NULL,
                                               schema_release_ptr(), private_block(sallocs)))
     catch
-        for i in 1:done
+        for i in 1:ncols
+            exported[i] || continue
             release_schema(unsafe_load(schildren, i))
             release_array(unsafe_load(achildren, i))
         end

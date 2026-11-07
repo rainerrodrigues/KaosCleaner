@@ -1,5 +1,12 @@
-using KaosCleaner, DataFrames, Dates, JSON3, Test
+using KaosCleaner, DataFrames, Dates, JSON3, Random, Test
 using KaosCleaner: ArrowSchema, ArrowArray, ArrowArrayStream
+
+# A value type whose hash is constant: distinct values collide on purpose
+struct ConstHash
+    v::Int
+end
+Base.hash(::ConstHash, h::UInt) = h
+Base.isequal(x::ConstHash, y::ConstHash) = x.v == y.v
 
 # Minimal consumer: read one exported child column back into Julia values.
 function read_column(s::ArrowSchema, a::ArrowArray)
@@ -210,6 +217,23 @@ end
             @test KaosCleaner.byte_summary(T(s)) == generic(T(s))
         end
         @test KaosCleaner.byte_summary(IS.String7("a\xff")) == generic(IS.String7("a\xff"))
+    end
+
+    @testset "parallel paths match sequential" begin
+        # Force the parallel code even for small tables and single-threaded runs
+        rng = Random.MersenneTwister(4)
+        d = DataFrame(a=rand(rng, 1:40, 5_000), b=rand(rng, ["x", "y", missing], 5_000), c=rand(rng, [1.5, NaN, -0.0, 0.0], 5_000))
+        seq = KaosCleaner.duplicate_rows(d; tasks=1)
+        @test seq == KaosCleaner.duplicate_rows(d; tasks=5, min_rows=0)
+        @test isequal(d[.!seq, :], unique(d))
+        # Distinct rows with equal hashes: the batched check must fall back to exact
+        c = DataFrame(x=ConstHash.(repeat([1, 2, 1, 3, 2, 2], 10)))
+        @test findall(KaosCleaner.duplicate_rows(c; tasks=3, min_rows=0)) == findall(nonunique(c))
+
+        df = DataFrame(i=[1, 2, missing], s=["héllo", missing, ""], f=[1.5, missing, 3.0])
+        _, par = export_and_read((s, a) -> (export_dataframe(df, s, a; parallel=true); 0))
+        _, seqx = export_and_read((s, a) -> (export_dataframe(df, s, a; parallel=false); 0))
+        @test isequal(par, seqx) && isequal(par, df)
     end
 
     @testset "duplicate_rows" begin

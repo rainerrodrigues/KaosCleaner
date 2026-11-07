@@ -57,9 +57,15 @@ otherwise a format is only used if no other default format reads the values
 differently.
 """
 function infer_datetime(col::AbstractVector, user_formats::Vector{String})
-    values = String[x for x in col if !ismissing(x)]
-    isempty(values) && return nothing
-    sample = values[1:min(end, 200)]
+    # The first 200 values decide the format; collect only those (copying the
+    # whole column cost ~25 ms per million rows)
+    sample = String[]
+    for x in col
+        ismissing(x) && continue
+        push!(sample, String(x))
+        length(sample) == 200 && break
+    end
+    isempty(sample) && return nothing
     formats = isempty(user_formats) ? DATETIME_FORMATS : user_formats
     fits = String[]
     parsed = Vector{Any}[]

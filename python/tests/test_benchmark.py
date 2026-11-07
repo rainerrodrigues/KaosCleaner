@@ -78,10 +78,10 @@ def _median_time(fn, path, runs=7):
     return statistics.median(times)
 
 
-# Regression guard: on 100k rows kaos_cleaner measures ~1.26x the speed of the
-# equivalent pandas code on a 12-core machine (threaded parsing); GitHub's
-# 4-core runners will show less. 0.7x still fails if threading or the cleaning
-# fast paths stop working (single-threaded runs measure ~0.4x).
+# Regression guard: on 100k rows kaos_cleaner measures ~1.95x the speed of the
+# equivalent pandas code on a 12-core machine (parallel parsing, deduplication
+# and export); GitHub's 4-core runners show less. 0.7x still fails if
+# threading or the cleaning fast paths stop working (one thread: ~0.6x).
 MIN_SPEEDUP_VS_PANDAS = 0.7
 
 
