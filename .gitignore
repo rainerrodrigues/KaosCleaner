@@ -14,3 +14,4 @@ __pycache__/
 *:Zone.Identifier
 /.claude/
 .pytest_cache/
+/site/
