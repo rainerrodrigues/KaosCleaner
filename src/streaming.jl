@@ -36,7 +36,7 @@ mutable struct CleanStream
     plan::Vector{ColumnPlan}
     opts::CleanOptions
     markers::Markers
-    chunks::CSV.Chunks
+    chunks::Union{CSV.Chunks, Vector{<:CSV.File}}  # iterate(chunks, i) -> (CSV.File, i + 1)
     next_chunk::Int
     seen::Union{Nothing, Set{Tuple{UInt, UInt}}}  # row fingerprints, for dedupe
     carry::Dict{String, Any}                      # last value per column, for ffill
@@ -97,11 +97,29 @@ function open_stream(path::AbstractString, opts::CleanOptions, chunk_bytes::Inte
     plan = stream_plan(path, opts)
     check_streaming_impute(plan, opts)
     nchunks = max(1, cld(filesize(path), chunk_bytes))
-    chunks = CSV.Chunks(path; ntasks=nchunks, select=[p.source for p in plan],
-                        types=Dict(p.source => Union{Missing, p.parse_type} for p in plan),
-                        missingstring=vcat(MISSING_STRINGS, opts.missing_values), stripwhitespace=true)
+    kwargs = (select=[p.source for p in plan], types=Dict(p.source => Union{Missing, p.parse_type} for p in plan),
+              missingstring=vcat(MISSING_STRINGS, opts.missing_values), stripwhitespace=true)
+    chunks = file_chunks(path, nchunks, kwargs)
     seen = opts.dedupe ? Set{Tuple{UInt, UInt}}() : nothing
     return CleanStream(plan, opts, Markers(opts.missing_values), chunks, 1, seen, Dict{String, Any}(), 0, 0, 0, "")
+end
+
+"""
+    file_chunks(path, nchunks, kwargs)
+
+The chunks to parse `path` in: `CSV.Chunks`, or the whole file as one chunk.
+CSV.jl only splits a file it would parse in parallel (more than one chunk and
+a file that is not small); anything else is read with a single `CSV.File`.
+"""
+function file_chunks(path::AbstractString, nchunks::Integer, kwargs::NamedTuple)
+    single() = [CSV.File(path; kwargs...)]
+    nchunks == 1 && return single()
+    try
+        return CSV.Chunks(path; ntasks=nchunks, kwargs...)
+    catch e
+        e isa ArgumentError && occursin("unable to iterate chunks", e.msg) && return single()
+        rethrow()
+    end
 end
 
 "The next cleaned, non-empty batch, or `nothing` at the end of the file."

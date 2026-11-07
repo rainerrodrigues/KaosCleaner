@@ -230,6 +230,13 @@ def test_streaming_to_parquet(valid_csv, tmp_path):
     assert pl.read_parquet(out)["id"].to_list() == list(range(10_000))
 
 
+def test_streaming_with_default_chunk_size(valid_csv, tmp_path):
+    """The whole file fits one default-sized chunk: must work, not fail to split."""
+    out = tmp_path / "default.parquet"
+    assert kaos_cleaner.clean_csv_to_parquet(valid_csv, str(out)) == 10_000
+    assert sum(b.num_rows for b in kaos_cleaner.iter_clean_csv(valid_csv)) == 10_000
+
+
 def test_streaming_rejects_whole_file_imputation(valid_csv):
     with pytest.raises(RuntimeError, match="needs the whole file"):
         kaos_cleaner.iter_clean_csv(valid_csv, impute="median")

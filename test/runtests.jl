@@ -172,6 +172,12 @@ end
         streamed = reduce(vcat, batches)
         @test isequal(streamed, clean_dataset(load_dataset(path)))  # same as in memory, dedupe across chunks
         @test nonmissingtype(eltype(streamed.paid)) == Bool         # conversion from the sample
+        # One chunk covers the file (the default 256 MB, or CSV.jl declining to
+        # split a small file): read as a single CSV.File instead of failing
+        for chunk in (256 * 2^20, 2_000)
+            whole = read_stream(path, "", chunk)
+            @test whole isa Vector{DataFrame} && isequal(reduce(vcat, whole), streamed)
+        end
 
         ff = reduce(vcat, read_stream(path, """{"impute": {"score": "ffill"}, "dedupe": false}"""))
         @test !any(ismissing, ff.score[2:end])                      # carried across batches
