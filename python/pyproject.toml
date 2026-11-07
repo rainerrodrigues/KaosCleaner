@@ -22,7 +22,6 @@ classifiers = [
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Julia",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
