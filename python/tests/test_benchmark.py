@@ -78,12 +78,11 @@ def _median_time(fn, path, runs=7):
     return statistics.median(times)
 
 
-# Regression guard, not a claim of victory: on 100k rows kaos_cleaner currently
-# runs at ~0.35x the speed of the equivalent pandas code (measured 0.34-0.38x;
-# CSV parsing is single-threaded in the embedded runtime and every text cell
-# is re-allocated). The floor catches real slowdowns without tripping on CI
-# noise; raise it as the engine gets faster.
-MIN_SPEEDUP_VS_PANDAS = 0.2
+# Regression guard: on 100k rows kaos_cleaner measures ~1.26x the speed of the
+# equivalent pandas code on a 12-core machine (threaded parsing); GitHub's
+# 4-core runners will show less. 0.7x still fails if threading or the cleaning
+# fast paths stop working (single-threaded runs measure ~0.4x).
+MIN_SPEEDUP_VS_PANDAS = 0.7
 
 
 def test_speed_vs_pandas(bench_csv):
