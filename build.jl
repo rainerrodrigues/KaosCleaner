@@ -73,3 +73,14 @@ if !Sys.iswindows() && Sys.which("strip") !== nothing
     lib = joinpath(OUT, "lib", Sys.isapple() ? "libkaoscleaner.dylib" : "libkaoscleaner.so")
     run(Sys.isapple() ? `strip -S $lib` : `strip --strip-debug $lib`)
 end
+
+# On macOS PackageCompiler gives the library @executable_path rpaths, so it
+# only finds libjulia when the host program sits in lib/ (Linux uses $ORIGIN,
+# the library's own directory). Add the @loader_path equivalents so any host,
+# such as python, can load it; then re-sign, because Apple silicon refuses to
+# load a modified binary whose signature no longer matches.
+if Sys.isapple()
+    lib = joinpath(OUT, "lib", "libkaoscleaner.dylib")
+    run(`install_name_tool -add_rpath @loader_path -add_rpath @loader_path/julia $lib`)
+    run(`codesign --force --sign - $lib`)
+end
