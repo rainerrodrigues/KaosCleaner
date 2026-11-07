@@ -11,7 +11,7 @@ and macOS on Apple silicon, for Python 3.9 and later. Each wheel contains the
 compiled engine and its Julia runtime, so nothing else needs installing.
 
 !!! note "First import"
-    The first time the engine starts it unpacks its runtime (about 600 MB)
+    The first time the engine starts it unpacks its runtime (about 500 MB)
     into your user cache directory, which takes a few seconds. Later starts
     take well under a second. The cache lives in `~/.cache/kaos_cleaner`
     (Linux), `~/Library/Caches/kaos_cleaner` (macOS) or
