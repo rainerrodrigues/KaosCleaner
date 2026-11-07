@@ -106,16 +106,17 @@ troubleshooting and the C API.
 
 ## Performance
 
-Same cleaning in three engines, median of 5 runs on a 6-core laptop
+Same cleaning in three engines, median of 5 runs (3 at 10M) on a 6-core laptop
 ([details and caveats](https://rainerrodrigues.github.io/KaosCleaner/benchmarks/)):
 
 | Rows | pandas | Polars | kaos-cleaner |
 |---:|---:|---:|---:|
-| 100,000 | 61 ms | 63 ms | **43 ms** |
-| 1,000,000 | **421 ms** | 431 ms | 478 ms |
+| 100,000 | 65 ms | 70 ms | **34 ms** |
+| 1,000,000 | 524 ms | **311 ms** | 342 ms |
+| 10,000,000 | 6,761 ms | 3,948 ms | **3,327 ms** |
 
 kaos-cleaner also infers booleans, dates and formatted numbers, which the
-pandas and Polars versions do not.
+pandas and Polars versions do not. Reproduce with `python scripts/benchmark.py`.
 
 ## How it works
 

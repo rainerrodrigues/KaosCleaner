@@ -1,8 +1,12 @@
 # Benchmarks
 
 Numbers from one machine, to show orders of magnitude and trade-offs, not to
-crown a winner. Run them yourself with
-`pytest python/tests/test_benchmark.py --benchmark-columns=min,median`.
+crown a winner. Run them yourself:
+
+```bash
+pip install pandas polars pyarrow
+python scripts/benchmark.py            # 100k, 1M and 10M rows
+```
 
 **Machine**: AMD Ryzen 5 5600H (6 cores, 12 threads), 7.6 GB RAM, WSL2 on
 Windows. Python 3.14, pandas 3.1, Polars 2.1, PyArrow 26.
@@ -11,28 +15,36 @@ Windows. Python 3.14, pandas 3.1, Polars 2.1, PyArrow 26.
 
 Each engine does the same work: parse, treat the same markers as missing,
 trim text, snake_case column names, drop all-empty and duplicate rows. The
-pandas and Polars versions are in `python/tests/test_benchmark.py`. The data
-is generated messy CSV (integers, floats with `NA`s, padded text, timestamps,
-labels, ~2% duplicates). Times are the median of 5 runs after a warm-up, and
-include converting the result to a Polars DataFrame for kaos-cleaner.
+pandas and Polars versions are in `python/tests/test_benchmark.py`; all
+three keep exactly the same rows. The data is generated messy CSV (integers,
+floats with `NA`s, padded text, timestamps, labels, ~2% duplicate rows). Each
+engine runs in its own process; times are the median of 5 runs (3 at 10M)
+after a warm-up, and include converting the result to a Polars DataFrame for
+kaos-cleaner. pandas uses its default CSV parser.
 
 | Rows | File | pandas | Polars | kaos-cleaner |
 |---:|---:|---:|---:|---:|
-| 100,000 | 4.7 MB | 61 ms | 63 ms | **43 ms** |
-| 1,000,000 | 48 MB | **421 ms** | 431 ms | 478 ms |
+| 100,000 | 5 MB | 65 ms | 70 ms | **34 ms** |
+| 1,000,000 | 50 MB | 524 ms | **311 ms** | 342 ms |
+| 10,000,000 | 505 MB | 6,761 ms | 3,948 ms | **3,327 ms** |
 
-On this data kaos-cleaner is the fastest at 100k rows and roughly on par at
-a million. kaos-cleaner also infers booleans, dates and formatted numbers in
-text columns, which the pandas and Polars versions above do not do.
+Peak memory at 10 million rows: pandas 2,892 MB, Polars 3,289 MB,
+kaos-cleaner 2,750 MB (including its ~500 MB runtime).
+
+On this data kaos-cleaner is the fastest at 100k and at 10M rows, and within
+about 10% of Polars at a million. It also infers booleans, dates and
+formatted numbers in text columns, which the pandas and Polars versions above
+do not do.
 
 ## Threads
 
-CSV parsing is the biggest cost and runs on all cores by default:
+Parsing, duplicate detection and the Arrow export run on all cores by
+default:
 
 | Rows | 1 thread | all 12 threads |
 |---:|---:|---:|
-| 100,000 | 96 ms | 43 ms |
-| 1,000,000 | 1,257 ms | 478 ms |
+| 100,000 | 105 ms | 34 ms |
+| 1,000,000 | 1,212 ms | 342 ms |
 
 On machines with fewer cores, expect numbers between the two columns.
 
