@@ -178,24 +178,78 @@ function select_columns!(df::DataFrame, opts::CleanOptions)
 end
 
 """
-    duplicate_rows(df) -> BitVector
+    duplicate_rows(df; tasks=Threads.nthreads(), min_rows=PARALLEL_MIN_ROWS) -> BitVector
 
 Mark rows equal (by `isequal`, as `unique!`) to an earlier row. Rows are
 hashed one column at a time and only hash matches are compared in full.
 DataFrames' `unique!` specializes on all column types at once, which takes
 minutes to compile for files with hundreds of columns.
+
+Tables of at least `min_rows` rows are processed by `tasks` tasks: rows are
+hashed in ranges, then
+split into groups by hash. Equal rows always share a hash and so a group, and
+each group is scanned in row order, so the first occurrence is kept exactly
+as in a sequential scan.
 """
-function duplicate_rows(df::AbstractDataFrame)
+function duplicate_rows(df::AbstractDataFrame; tasks::Integer=Threads.nthreads(),
+                        min_rows::Integer=PARALLEL_MIN_ROWS)
     cols = collect(AbstractVector, eachcol(df))
-    hashes = zeros(UInt, nrow(df))
-    for col in cols
-        hash_column!(hashes, col)
+    n = nrow(df)
+    tasks = n < min_rows ? 1 : max(1, tasks)
+    hashes = zeros(UInt, n)
+    @sync for rows in Iterators.partition(1:n, max(1, cld(n, tasks)))
+        Threads.@spawn for col in cols
+            hash_column!(hashes, col, rows)
+        end
     end
-    same(i, j) = all(col -> isequal(col[i], col[j]), cols)
-    first = sizehint!(Dict{UInt, Int}(), length(hashes))  # hash -> first row with it
-    others = Dict{UInt, Vector{Int}}()  # further distinct rows sharing a hash (rare)
-    dup = falses(length(hashes))
+    dup = zeros(Bool, n)  # not a BitVector: tasks write neighbouring elements
+    @sync for group in 0:tasks-1
+        Threads.@spawn mark_duplicates!(dup, hashes, cols, UInt(group), UInt(tasks))
+    end
+    return BitVector(dup)
+end
+
+"Below this many rows, splitting work across tasks costs more than it saves."
+const PARALLEL_MIN_ROWS = 50_000
+
+# Mark duplicates among the rows whose hash falls in `group` (of `ngroups`).
+# Rows repeating an earlier row's hash are confirmed column by column in one
+# batch (a type-stable loop per column) rather than value by value through
+# dynamic dispatch, which cost ~1 µs per duplicate. If any pair turns out to
+# be a hash collision, the group is redone exactly, row by row.
+function mark_duplicates!(dup::Vector{Bool}, hashes::Vector{UInt}, cols, group::UInt, ngroups::UInt)
+    first = Dict{UInt, Int}()  # hash -> first row with it
+    sizehint!(first, cld(length(hashes), Int(ngroups)))
+    rows, earlier = Int[], Int[]  # candidate duplicate and the row it would repeat
     for (i, h) in enumerate(hashes)
+        h % ngroups == group || continue
+        j = get!(first, h, i)
+        j == i || (push!(rows, i); push!(earlier, j))
+    end
+    equal = trues(length(rows))
+    for col in cols
+        confirm_equal!(equal, col, rows, earlier)
+    end
+    if all(equal)
+        dup[rows] .= true
+    else
+        mark_duplicates_exactly!(dup, hashes, cols, group, ngroups)
+    end
+end
+
+function confirm_equal!(equal::BitVector, col::AbstractVector, rows::Vector{Int}, earlier::Vector{Int})
+    @inbounds for k in eachindex(rows)
+        equal[k] && (equal[k] = isequal(col[rows[k]], col[earlier[k]]))
+    end
+end
+
+# Row-by-row version, which handles distinct rows sharing a hash
+function mark_duplicates_exactly!(dup::Vector{Bool}, hashes::Vector{UInt}, cols, group::UInt, ngroups::UInt)
+    same(i, j) = all(col -> isequal(col[i], col[j]), cols)
+    first = Dict{UInt, Int}()
+    others = Dict{UInt, Vector{Int}}()  # further distinct rows sharing a hash
+    for (i, h) in enumerate(hashes)
+        h % ngroups == group || continue
         j = get(first, h, 0)
         if j == 0
             first[h] = i
@@ -205,12 +259,11 @@ function duplicate_rows(df::AbstractDataFrame)
             push!(get!(Vector{Int}, others, h), i)
         end
     end
-    return dup
 end
 
 # Function barrier: compiled once per column type, not per combination of them
-function hash_column!(hashes::Vector{UInt}, col::AbstractVector)
-    for i in eachindex(hashes, col)
+function hash_column!(hashes::Vector{UInt}, col::AbstractVector, rows=eachindex(hashes, col))
+    for i in rows
         hashes[i] = hash(col[i], hashes[i])
     end
 end
