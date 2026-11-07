@@ -31,7 +31,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Python test dependencies
-        run: python -m pip install pyarrow polars cffi pytest pytest-benchmark pandas
+        run: python -m pip install pyarrow polars cffi pytest pytest-benchmark pandas trove-classifiers
 
       - name: Bridge tests and benchmarks
         run: >
