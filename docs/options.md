@@ -16,6 +16,12 @@ problem.
 | `datetime_formats` | none | Date formats to use, e.g. `["dd/mm/yyyy"]` |
 | `impute` | none | Fill missing values (strategy, or `{column: strategy}`) |
 | `epoch` | none | Numeric columns holding times since 1970, as `{column: unit}` (`s`, `ms`, `us`, `ns`); see [Sensor data](sensor-data.md) |
+| `time_column` | none | The column holding each row's time; interpolation then weights by time |
+| `outliers` | none | Turn outliers into missing values: `"zscore"`, `"iqr"`, `"mad"`, `"hampel"` (or `{column: method}`) |
+| `outlier_threshold` | per method | How far out a value must be (zscore 3, iqr 1.5, mad 3.5, hampel 3) |
+| `outlier_window` | `7` | Rows in the hampel window |
+| `resample` | none | Put rows on a fixed time grid, e.g. `"10ms"` (needs `time_column`) |
+| `resample_method` | `"linear"` | `"linear"`, `"mean"` or `"last"`; see [Sensor and robot data](sensor-data.md) |
 | `source_row` | `False` | Add a first column with each row's position in the source; see [Undo the cleaning](restore.md) |
 
 ### Parsing options
@@ -27,7 +33,7 @@ These describe how a text file is written; they apply to files only (not to
 |---|---|---|
 | `delimiter` | detected | Field separator, one character: `","`, `"\t"`, `";"`, `"\|"` |
 | `decimal` | `"."` | Decimal mark in numbers, e.g. `","` for `3,14` |
-| `thousands` | none | Thousands separator inside numbers, e.g. `"."` for `1.234,50` |
+| `thousands` | none | Thousands separator inside numbers, e.g. `"."` for `1.234,50`; read by type inference, which requires groups of three digits (so `02.01.2024` stays a date) |
 | `comment` | none | Skip lines starting with this text, e.g. `"#"` |
 | `header` | `1` | Line number of the header row; lines above it are skipped. `0`: no header, columns are named `column1`, `column2`, ... |
 
@@ -56,8 +62,10 @@ Steps run in this order:
 5. **Infer types** (`infer_types`).
 6. **Drop empty rows** (`drop_empty_rows`).
 7. **Drop duplicate rows** (`dedupe`), comparing every column; `null` equals `null`.
-8. **Impute** (`impute`).
-9. Columns without remaining nulls are marked non-nullable.
+8. **Outliers** to missing (`outliers`).
+9. **Impute** (`impute`).
+10. **Resample** (`resample`).
+11. Columns without remaining nulls are marked non-nullable.
 
 ## Missing values
 

@@ -39,6 +39,11 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      # Compile for any x86-64 CPU, as the release builds do. With the default
+      # (native), a base image cached by a runner with another CPU model fails
+      # to load: "Unable to find compatible target in cached code image".
+      KAOS_CPU_TARGET: generic
     steps:
       - uses: actions/checkout@v7
 

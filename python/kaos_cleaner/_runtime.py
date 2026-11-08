@@ -163,6 +163,12 @@ def load():
         ctypes.c_void_p,
     ]
     lib.kaos_clean_arrow.restype = ctypes.c_int
+    lib.kaos_session_open.argtypes = [ctypes.c_char_p]
+    lib.kaos_session_open.restype = ctypes.c_int64
+    lib.kaos_session_clean.argtypes = [ctypes.c_int64] + [ctypes.c_void_p] * 4
+    lib.kaos_session_clean.restype = ctypes.c_int
+    lib.kaos_session_close.argtypes = [ctypes.c_int64]
+    lib.kaos_session_close.restype = None
 
     # Boot the Julia runtime once, before any other call into the library.
     # kaos_init_julia (not init_julia) leaves this thread GC-safe, so calls and

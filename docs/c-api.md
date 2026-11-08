@@ -67,6 +67,9 @@ garbage collector when another thread calls in.
 | `int process_dataset(const char* path, struct ArrowSchema*, struct ArrowArray*)` | Same with default options |
 | `int kaos_open_stream(const char* path, const char* options_json, int64_t chunk_bytes, struct ArrowArrayStream*)` | Clean a file chunk by chunk as an Arrow stream |
 | `int kaos_clean_arrow(struct ArrowSchema* in_schema, struct ArrowArray* in_array, const char* options_json, struct ArrowSchema* out_schema, struct ArrowArray* out_array)` | Clean a record batch already in memory |
+| `int64_t kaos_session_open(const char* options_json)` | Start a live cleaning session; returns its id, 0 on failure |
+| `int kaos_session_clean(int64_t session, struct ArrowSchema* in_schema, struct ArrowArray* in_array, struct ArrowSchema* out_schema, struct ArrowArray* out_array)` | Clean the next batch of a session |
+| `void kaos_session_close(int64_t session)` | End a session and free its state |
 | `const char* kaos_last_error(void)` | Message for the last failure |
 | `const char* kaos_take_logs(void)` | Log records since the last call, as JSON |
 
@@ -112,6 +115,16 @@ is an error. Convert such columns first, as the Python package's
 The library copies the values and **always releases the input structs**,
 on success and on failure, so the caller must not release them again. The
 parsing options (`delimiter`, `decimal`, ...) have no effect here.
+
+## Live sessions
+
+`kaos_session_open` starts a session for data that arrives in pieces. Each
+`kaos_session_clean` call takes a batch exactly like `kaos_clean_arrow`
+(and always releases it). The first batch fixes the output columns and
+types, and later batches must have the same columns. Duplicate fingerprints,
+`ffill` values and `source_row` numbers carry over between calls. Every
+output field is nullable, so all batches share one schema. A session may be
+used from any thread, one call at a time; call `kaos_session_close` when done.
 
 ## Streams
 

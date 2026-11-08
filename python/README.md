@@ -56,6 +56,17 @@ original = restore(df, "orders.csv")            # those rows exactly as in the f
 removed = restore(df, "orders.csv", rows="dropped")
 ```
 
+## Sensor and robot data
+
+```python
+df = clean_csv("imu.csv", epoch={"stamp": "ns"}, time_column="stamp",
+               outliers="hampel", impute="interpolate", resample="10ms")
+
+with LiveCleaner(impute="ffill") as cleaner:      # state kept between batches
+    for batch in feed:
+        publish(cleaner.clean(batch))
+```
+
 ## Files larger than memory
 
 ```python

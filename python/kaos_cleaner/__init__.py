@@ -17,6 +17,7 @@ parse warnings) go to the standard `logging` logger "kaos_cleaner".
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -37,6 +38,7 @@ __all__ = [
     "clean_file",
     "clean_table",
     "restore",
+    "LiveCleaner",
     "process_dataset",
     "iter_clean_csv",
     "clean_csv_to_parquet",
@@ -80,6 +82,12 @@ def _options_json(
     comment=None,
     header=None,
     epoch=None,
+    time_column=None,
+    outliers=None,
+    outlier_threshold=None,
+    outlier_window=None,
+    resample=None,
+    resample_method=None,
     source_row=None,
     raw=None,
 ):
@@ -100,6 +108,12 @@ def _options_json(
         comment=comment,
         header=header,
         epoch=epoch,
+        time_column=time_column,
+        outliers=outliers,
+        outlier_threshold=outlier_threshold,
+        outlier_window=outlier_window,
+        resample=resample,
+        resample_method=resample_method,
         source_row=source_row,
         raw=raw,
     )
@@ -133,6 +147,12 @@ def process_dataset(
     comment: str | None = None,
     header: int | None = None,
     epoch: Mapping[str, str] | None = None,
+    time_column: str | None = None,
+    outliers: str | Mapping[str, str] | None = None,
+    outlier_threshold: float | None = None,
+    outlier_window: int | None = None,
+    resample: str | None = None,
+    resample_method: str | None = None,
     source_row: bool | None = None,
 ) -> pyarrow.Table:
     """Load and clean a CSV file, returning a pyarrow Table.
@@ -175,6 +195,21 @@ def process_dataset(
         epoch: Numeric columns holding times since 1970, converted to
             nanosecond timestamps: ``{column: unit}`` with unit "s", "ms",
             "us" or "ns", e.g. ``{"stamp": "ns"}``. Cleaned column names.
+        time_column: The column holding each row's time (cleaned name).
+            With it, "interpolate" weights gaps by time instead of row
+            position, and `resample` becomes available.
+        outliers: Turn outliers in numeric columns into missing values (so
+            `impute` can fill them): one method for all numeric columns or a
+            ``{column: method}`` dict. Methods: "zscore", "iqr", "mad"
+            (robust), "hampel" (rolling median; follows drifting signals).
+        outlier_threshold: How far out a value must be; defaults per method:
+            zscore 3, iqr 1.5, mad 3.5, hampel 3.
+        outlier_window: Rows in the hampel window, odd and at least 3 [7].
+        resample: Put the data on a fixed time grid with this period, e.g.
+            ``"10ms"``, ``"1s"``, ``"5min"`` (units ns, us, ms, s, min, h).
+            Needs `time_column`; grid times are multiples of the period.
+        resample_method: "linear" (interpolate at grid times; latest value
+            for non-numeric columns), "mean" or "last" (per period) ["linear"].
         source_row: Add a first column ``source_row`` holding each row's
             position among the file's data rows (1 = the first row after the
             header), so cleaned rows can be traced back with `restore`
@@ -203,6 +238,12 @@ def process_dataset(
         comment=comment,
         header=header,
         epoch=epoch,
+        time_column=time_column,
+        outliers=outliers,
+        outlier_threshold=outlier_threshold,
+        outlier_window=outlier_window,
+        resample=resample,
+        resample_method=resample_method,
         source_row=source_row,
     )
     return _run_file(path, options)
@@ -676,3 +717,94 @@ def restore(cleaned: Any, source: Any, *, rows: str = "kept", **parsing: Any) ->
             kept = pc.is_in(pa.array(range(n), pa.int64()), value_set=pa.array(positions, pa.int64()))
             original = original.filter(pc.invert(kept))
     return _from_arrow(original, kind)
+
+
+class LiveCleaner:
+    """Clean a live feed batch by batch, with state carried between batches.
+
+    For data that arrives in pieces (a sensor topic, a message queue, a
+    polling loop) and is cleaned as it comes. Unlike separate `clean_table`
+    calls, a session remembers:
+
+    - the column types the first batch decided, so every batch comes back
+      with the same schema (values that do not fit become missing, with a
+      warning on the "kaos_cleaner" logger);
+    - every row seen, so ``dedupe`` drops repeats across batches;
+    - the last value of each column, so ``impute="ffill"`` fills a gap at the
+      start of a batch from the previous one;
+    - the row count, so ``source_row`` numbers rows across the whole feed.
+
+    Options are those of `clean_table`, except that ``impute`` is limited to
+    "zero" and "ffill", and ``outliers`` and ``resample`` (which need all the
+    data) are not available. Every output column is nullable.
+
+    Example:
+        >>> with LiveCleaner(impute="ffill", epoch={"stamp": "ns"}) as cleaner:
+        ...     for msg_batch in feed:
+        ...         publish(cleaner.clean(msg_batch))
+    """
+
+    def __init__(self, **options: Any) -> None:
+        self._id = 0
+        _reject_parsing(options, "apply to files only")
+        options_json = _options_json(**options)
+        with _runtime.lock:
+            lib = _runtime.load()
+            session = lib.kaos_session_open(options_json.encode())
+            _emit_logs(lib)
+            if session == 0:
+                raise RuntimeError(lib.kaos_last_error().decode("utf-8", errors="replace"))
+        self._id = session
+
+    def clean(self, data: Any) -> Any:
+        """Clean the next batch: a pyarrow Table or RecordBatch, or a polars or pandas DataFrame.
+
+        Returns the cleaned batch as the same kind of object.
+        """
+        import pyarrow as pa
+        from pyarrow.cffi import ffi
+
+        if not self._id:
+            raise RuntimeError("this LiveCleaner is closed")
+        batch, kind = _as_batch(data)
+        in_schema, in_array = ffi.new("struct ArrowSchema*"), ffi.new("struct ArrowArray*")
+        out_schema, out_array = ffi.new("struct ArrowSchema*"), ffi.new("struct ArrowArray*")
+        ptr = lambda c: int(ffi.cast("uintptr_t", c))  # noqa: E731
+        batch._export_to_c(ptr(in_array), ptr(in_schema))
+        try:
+            with _runtime.lock:
+                lib = _runtime.load()
+                status = lib.kaos_session_clean(
+                    self._id, ptr(in_schema), ptr(in_array), ptr(out_schema), ptr(out_array)
+                )
+                _emit_logs(lib)
+                if status != 0:
+                    raise RuntimeError(lib.kaos_last_error().decode("utf-8", errors="replace"))
+        finally:
+            _release(in_array, in_schema)
+        try:
+            result = pa.RecordBatch._import_from_c(ptr(out_array), ptr(out_schema))
+        except BaseException:
+            _release(out_array, out_schema)
+            raise
+        if kind == "batch":
+            return result
+        return _from_arrow(pa.Table.from_batches([result]), kind)
+
+    def close(self) -> None:
+        """Free the session's state; further `clean` calls raise. Safe to call twice."""
+        if self._id:
+            with _runtime.lock:
+                _runtime.load().kaos_session_close(self._id)
+            self._id = 0
+
+    def __enter__(self) -> LiveCleaner:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        if self._id:  # at interpreter shutdown the runtime may already be gone
+            with contextlib.suppress(Exception):
+                self.close()

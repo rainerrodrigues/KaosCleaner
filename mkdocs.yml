@@ -18,6 +18,14 @@ nav:
       - Logging: logging.md
       - Recipes: recipes.md
       - Troubleshooting: troubleshooting.md
+  - Tutorials:
+      - Overview: tutorials/index.md
+      - 1. Clean your first file: tutorials/first-file.md
+      - 2. Odd formats: tutorials/formats.md
+      - 3. A robot's sensor log: tutorials/robot-log.md
+      - 4. Live data: tutorials/live-data.md
+      - 5. Audit and undo: tutorials/audit-undo.md
+      - 6. Files larger than memory: tutorials/large-files.md
   - Reference:
       - Python API: api.md
       - Julia: julia.md

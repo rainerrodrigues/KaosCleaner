@@ -291,6 +291,12 @@ end
         o = KaosCleaner.parse_options("""{"delimiter": ";", "decimal": ",", "thousands": ".", "comment": "#"}""")
         out = clean_dataset!(load_dataset(eu, o), o)
         @test out.price == [1234.5, 12.75] && out.city == ["Köln", "Bonn"]
+        # dates with dots next to a "." thousands mark: dates, not 2012024 (groups of three only)
+        de = joinpath(dir, "de.csv")
+        write(de, "Datum;Umsatz;Stück\n02.01.2024;1.234,50;1.000\n03.01.2024;980,00;12\n")
+        o2 = KaosCleaner.parse_options("""{"delimiter": ";", "decimal": ",", "thousands": "."}""")
+        d = clean_dataset!(load_dataset(de, o2), o2)
+        @test d.datum == [Date(2024, 1, 2), Date(2024, 1, 3)] && d.umsatz == [1234.5, 980.0] && d[!, "stück"] == [1000, 12]
         hdr = joinpath(dir, "hdr.tsv")
         write(hdr, "title\nexported 2024\nid\tname\n1\tA\n2\tB\n")
         h = CleanOptions(header=3)
@@ -367,6 +373,85 @@ end
         @test KaosCleaner.epoch_timestamp(UInt64(10)^19, 1) === nothing
         @test KaosCleaner.epoch_timestamp("1.5", 1000) == T(1500) && KaosCleaner.epoch_timestamp(-1.5, 1) == T(-2)
         @test KaosCleaner.epoch_timestamp(1.7e9 + 0.000001, 1_000_000_000).ns % 1_000_000_000 in 750:1250  # Float64 resolves ~240 ns here
+    end
+
+    @testset "sensor data: outliers, time interpolation, resampling" begin
+        T = KaosCleaner.Timestamp
+        ms(x) = T(Int64(x) * 1_000_000)
+        # outliers
+        x = [1.0, 1.1, 0.9, 1.0, 50.0, 1.05, 0.95, 1.0, -40.0, 1.0]
+        @test findall(KaosCleaner.outlier_mask(x, "mad", 3.5)) == [5, 9]
+        @test findall(KaosCleaner.outlier_mask(x, "iqr", 1.5)) == [5, 9]
+        @test findall(KaosCleaner.outlier_mask(x, "hampel", 3.0, 5)) == [5, 9]
+        @test isempty(findall(KaosCleaner.outlier_mask(fill(2.0, 10), "zscore", 3.0)))
+        drift = collect(1.0:100.0); drift[50] = 500.0       # a spike on a ramp: only hampel sees it as local
+        @test findall(KaosCleaner.outlier_mask(drift, "hampel", 3.0, 7)) == [50]
+        o = CleanOptions(outliers="hampel", outlier_window=5, impute="interpolate")
+        df = clean_dataset(DataFrame(id=1:10, v=x), o)
+        @test df.v[5] ≈ (1.0 + 1.05) / 2 && df.v[9] ≈ 1.0 && df.id == 1:10   # removed, then interpolated
+        @test_throws ArgumentError clean_dataset(DataFrame(a=["x", "y", "z"]), CleanOptions(outliers=Dict("a" => "mad")))
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"outliers": "magic"}""")
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"outlier_window": 4}""")
+
+        # interpolation by time: uneven spacing, rows out of time order
+        t = [ms(0), ms(30), ms(10), ms(40)]
+        df = clean_dataset(DataFrame(t=t, v=[0.0, missing, missing, 4.0]),
+                           CleanOptions(time_column="t", impute="interpolate"))
+        @test df.v == [0.0, 3.0, 1.0, 4.0]
+        @test_throws ArgumentError clean_dataset(DataFrame(t=[1, 2], v=[1.0, missing]),
+                                                 CleanOptions(time_column="t", impute="interpolate"))
+
+        # resampling
+        raw = DataFrame(t=[ms(3), ms(12), ms(18), ms(41)], v=[3.0, 12.0, 18.0, 41.0], s=["a", "b", "c", "d"])
+        lin = clean_dataset(raw, CleanOptions(time_column="t", resample="10ms"))
+        @test lin.t == [ms(10), ms(20), ms(30), ms(40)]          # multiples of the period, within the data
+        @test lin.v ≈ [10.0, 20.0, 30.0, 40.0] && lin.s == ["a", "c", "c", "c"]
+        avg = clean_dataset(raw, CleanOptions(time_column="t", resample="10ms", resample_method="mean"))
+        @test avg.t == [ms(0), ms(10), ms(20), ms(30), ms(40)]
+        @test isequal(avg.v, [3.0, 15.0, missing, missing, 41.0]) && isequal(avg.s, ["a", "c", missing, missing, "d"])
+        last_ = clean_dataset(raw, CleanOptions(time_column="t", resample="20ms", resample_method="last"))
+        @test isequal(last_.v, [18.0, missing, 41.0]) && last_.t == [ms(0), ms(20), ms(40)]  # the grid stays regular
+        dt = clean_dataset(DataFrame(t=[DateTime(2024, 1, 1, 0, 0, 0), DateTime(2024, 1, 1, 0, 0, 2)], v=[0, 2]),
+                           CleanOptions(time_column="t", resample="1s"))
+        @test dt.v == [0.0, 1.0, 2.0] && eltype(dt.t) == T
+        @test KaosCleaner.period_ns("250us") == 250_000 && KaosCleaner.period_ns("2min") == 120_000_000_000
+        @test_throws ArgumentError KaosCleaner.period_ns("10 ms")
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"resample": "10ms"}""")             # no time column
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"resample": "1s", "time_column": "t", "source_row": true}""")
+        @test_throws ArgumentError clean_dataset(DataFrame(t=[ms(0), ms(10^12)], v=[1, 2]),
+                                                 CleanOptions(time_column="t", resample="1ns"))  # too many rows
+        @test_throws ArgumentError KaosCleaner.open_stream(@__FILE__, CleanOptions(outliers="mad"), 1024)
+    end
+
+    @testset "live sessions" begin
+        s = KaosCleaner.Session(CleanOptions(source_row=true, impute=Dict("v" => "ffill")))
+        b1 = KaosCleaner.clean_batch!(s, DataFrame(" ID " => [1, 2], "V" => [1.5, missing], "On" => ["yes", "no"]))
+        @test names(b1) == ["source_row", "id", "v", "on"] && eltype(b1.on) <: Union{Missing, Bool}
+        b2 = KaosCleaner.clean_batch!(s, DataFrame(" ID " => [2, 3, 2], "V" => [missing, 4.0, missing], "On" => ["no", "maybe", "no"]))
+        @test b2.source_row == [4]                      # rows 3 and 5 repeat input row 2, seen in the first batch
+        @test isequal(b2.on, [missing]) && b2.v == [4.0]  # "maybe" does not fit Bool -> missing
+        b3 = KaosCleaner.clean_batch!(s, DataFrame(" ID " => [9], "V" => [missing], "On" => ["yes"]))
+        @test b3.v == [4.0]                             # ffill carried over from the previous batch
+        @test_throws ArgumentError KaosCleaner.clean_batch!(s, DataFrame(other=[1]))
+        @test_throws ArgumentError KaosCleaner.Session(CleanOptions(impute="mean"))
+        @test_throws ArgumentError KaosCleaner.Session(CleanOptions(outliers="mad"))
+        # through the C entry points
+        id = KaosCleaner.session_open("""{"dedupe": true}""")
+        @test id > 0
+        sch = Ptr{ArrowSchema}(Libc.calloc(1, sizeof(ArrowSchema))); arr = Ptr{ArrowArray}(Libc.calloc(1, sizeof(ArrowArray)))
+        osch = Ptr{ArrowSchema}(Libc.calloc(1, sizeof(ArrowSchema))); oarr = Ptr{ArrowArray}(Libc.calloc(1, sizeof(ArrowArray)))
+        export_dataframe(DataFrame(a=[1, 1, 2]), sch, arr)
+        @test KaosCleaner.session_clean(id, sch, arr, osch, oarr) == 0
+        @test KaosCleaner.import_dataframe(osch, oarr).a == [1, 2]
+        export_dataframe(DataFrame(a=[2, 3]), sch, arr)
+        @test KaosCleaner.session_clean(id, sch, arr, osch, oarr) == 0
+        @test KaosCleaner.import_dataframe(osch, oarr).a == [3]   # 2 was seen in the first batch
+        KaosCleaner.session_close(id)
+        export_dataframe(DataFrame(a=[1]), sch, arr)
+        @test KaosCleaner.session_clean(id, sch, arr, osch, oarr) == 1   # closed; input still released
+        @test unsafe_load(arr).release == C_NULL
+        @test KaosCleaner.session_open("""{"impute": "median"}""") == 0
+        foreach(Libc.free, (sch, arr, osch, oarr))
     end
 
     @testset "streaming coercion" begin

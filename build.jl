@@ -29,6 +29,11 @@ create_library(@__DIR__, OUT;
     cpu_target=get(ENV, "KAOS_CPU_TARGET", "native"),
     # Leave out stdlibs our dependency tree never loads (Pkg, REPL, ...)
     filter_stdlibs=true,
+    # Leave out docstrings and source text, which only matter for developing
+    # in Julia (KAOS_STRIP=none keeps them). Not --strip-ir: without lowered
+    # code, any specialization the precompile trace missed cannot be compiled
+    # and the process aborts with a MissingCodeError.
+    sysimage_build_args=get(ENV, "KAOS_STRIP", "metadata") == "none" ? `` : `--strip-metadata`,
     force=true,
 )
 

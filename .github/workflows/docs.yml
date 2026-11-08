@@ -20,8 +20,10 @@ on:
 permissions:
   contents: read
 
+# Pull request builds are grouped per branch, so pushing to a PR never
+# cancels a deploy from main; a newer main run replaces an older one.
 concurrency:
-  group: pages
+  group: docs-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
   cancel-in-progress: true
 
 jobs:
@@ -47,6 +49,10 @@ jobs:
     needs: build
     if: github.event_name != 'pull_request' # PRs only check that the site builds
     runs-on: ubuntu-latest
+    # A deploy that has started is never cut off halfway
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write

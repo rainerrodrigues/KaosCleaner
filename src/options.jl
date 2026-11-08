@@ -2,6 +2,8 @@
 # arguments); every key is validated here so typos fail loudly.
 
 const IMPUTE_STRATEGIES = ("mean", "median", "mode", "zero", "ffill", "bfill", "interpolate")
+const OUTLIER_METHODS = ("zscore", "iqr", "mad", "hampel")
+const RESAMPLE_METHODS = ("linear", "mean", "last")
 
 Base.@kwdef struct CleanOptions
     "Columns to remove (original or snake_case names)."
@@ -34,6 +36,18 @@ Base.@kwdef struct CleanOptions
     header::Int = 1
     "Numeric columns holding times since 1970, as column => unit (s, ms, us or ns); converted to timestamps."
     epoch::Dict{String, String} = Dict{String, String}()
+    "The column holding each row's time (cleaned name); interpolation then weights by time, and resample needs it."
+    time_column::Union{Nothing, String} = nothing
+    "Turn outliers into missing values: one method for every numeric column, or column => method."
+    outliers::Union{Nothing, String, Dict{String, String}} = nothing
+    "How far from typical a value must be to count as an outlier; nothing = the method's default."
+    outlier_threshold::Union{Nothing, Float64} = nothing
+    "Rows in the rolling window of the hampel method (odd, at least 3)."
+    outlier_window::Int = 7
+    "Put the rows on a fixed time grid with this period, e.g. \"10ms\" (needs time_column)."
+    resample::Union{Nothing, String} = nothing
+    "How resampled values are computed: linear (interpolate at grid times), mean or last (per grid interval)."
+    resample_method::String = "linear"
     "Add a first column `source_row`: each row's position among the input's data rows (1 = first)."
     source_row::Bool = false
     "Read a file as it is: every column as untrimmed text, no missing markers, no cleaning steps."
@@ -63,6 +77,10 @@ end
 function check_parsing(o::CleanOptions)
     marks = filter(!isnothing, [o.delimiter, o.decimal, o.thousands])
     allunique(marks) || throw(ArgumentError("delimiter, decimal and thousands must be different characters"))
+    o.resample === nothing || o.time_column !== nothing ||
+        throw(ArgumentError("resample needs time_column: the column holding each row's time"))
+    o.resample === nothing || !o.source_row ||
+        throw(ArgumentError("resample makes new rows, which have no source row; drop source_row or resample"))
     return o
 end
 
@@ -87,6 +105,29 @@ function option_value(key::Symbol, value)
         (strings isa AbstractVector && all(s -> s isa AbstractString, strings)) ||
             throw(ArgumentError("option `$key` must be a string or a list of strings"))
         return String.(strings)
+    elseif key in (:time_column, :resample)
+        value isa AbstractString && !isempty(value) ||
+            throw(ArgumentError("option `$key` must be a non-empty string, got $(repr(value))"))
+        key == :resample && period_ns(value)  # validates
+        return String(value)
+    elseif key == :resample_method
+        value isa AbstractString && value in RESAMPLE_METHODS ||
+            throw(ArgumentError("option `resample_method` must be one of $(join(RESAMPLE_METHODS, ", ")), got $(repr(value))"))
+        return String(value)
+    elseif key == :outliers
+        check(m) = (m isa AbstractString && m in OUTLIER_METHODS) ? String(m) :
+            throw(ArgumentError("unknown outlier method $(repr(m)); use one of: $(join(OUTLIER_METHODS, ", "))"))
+        value isa AbstractString && return check(value)
+        value isa JSON3.Object && return Dict(String(k) => check(v) for (k, v) in value)
+        throw(ArgumentError("option `outliers` must be a method or a {column: method} mapping"))
+    elseif key == :outlier_threshold
+        value isa Real && !(value isa Bool) && value > 0 ||
+            throw(ArgumentError("option `outlier_threshold` must be a positive number, got $(repr(value))"))
+        return Float64(value)
+    elseif key == :outlier_window
+        value isa Integer && !(value isa Bool) && value >= 3 && isodd(value) ||
+            throw(ArgumentError("option `outlier_window` must be an odd number of rows, at least 3, got $(repr(value))"))
+        return Int(value)
     elseif key == :epoch
         value isa JSON3.Object ||
             throw(ArgumentError("option `epoch` must be a {column: unit} mapping, e.g. {\"stamp\": \"ns\"}"))

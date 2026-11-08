@@ -93,6 +93,32 @@ let opts = """{"epoch": {"stamp": "ns", "wall": "s"}, "impute": {"accel": "inter
     foreach(Libc.free, (schema, array, out_schema, out_array))
 end
 
+# Outliers, time-weighted interpolation and resampling (each method)
+for opts in ("""{"epoch": {"stamp": "ns"}, "time_column": "stamp", "outliers": "hampel", "impute": "interpolate", "resample": "1ms"}""",
+             """{"epoch": {"stamp": "ns"}, "time_column": "stamp", "outliers": {"accel": "mad"}, "resample": "1ms", "resample_method": "mean"}""",
+             """{"epoch": {"stamp": "ns"}, "time_column": "stamp", "outliers": "zscore", "resample": "1ms", "resample_method": "last"}""",
+             """{"outliers": "iqr"}""")
+    schema, array = (Libc.calloc(1, max(sizeof(ArrowSchema), sizeof(ArrowArray))) for _ in 1:2)
+    rc = GC.@preserve imu opts KaosCleaner.process_dataset_with_options(
+        Base.unsafe_convert(Cstring, imu), Base.unsafe_convert(Cstring, opts), schema, array)
+    rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    KaosCleaner.release!(schema, array)
+    foreach(Libc.free, (schema, array))
+end
+
+# A live session over two batches exported from a cleaned file
+let id = KaosCleaner.kaos_session_open(Base.unsafe_convert(Cstring, """{"impute": "ffill", "source_row": true}"""))
+    id > 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    for file in (path, messy)
+        schema, array, out_schema, out_array = (Libc.calloc(1, max(sizeof(ArrowSchema), sizeof(ArrowArray))) for _ in 1:4)
+        GC.@preserve file KaosCleaner.process_dataset(Base.unsafe_convert(Cstring, file), schema, array)
+        KaosCleaner.kaos_session_clean(id, schema, array, out_schema, out_array)  # 2nd: other columns, an error
+        unsafe_load(Ptr{ArrowArray}(out_array)).release == C_NULL || KaosCleaner.release!(out_schema, out_array)
+        foreach(Libc.free, (schema, array, out_schema, out_array))
+    end
+    KaosCleaner.kaos_session_close(id)
+end
+
 # In-memory cleaning: export a result and feed it back through
 # kaos_clean_arrow, so Arrow import is compiled in for every exported type
 for opts in ("", """{"impute": "zero"}""")
