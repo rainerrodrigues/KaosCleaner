@@ -67,6 +67,24 @@ for u in bundled
     end
 end
 
+# pkg-config file, relocatable via ${pcfiledir}, so C builds can use
+# `pkg-config --cflags --libs kaoscleaner` against an unpacked SDK
+version = Pkg.TOML.parsefile(joinpath(@__DIR__, "Project.toml"))["version"]
+libdir = Sys.iswindows() ? "bin" : "lib"
+mkpath(joinpath(OUT, "lib", "pkgconfig"))
+write(joinpath(OUT, "lib", "pkgconfig", "kaoscleaner.pc"), """
+prefix=\${pcfiledir}/../..
+libdir=\${prefix}/$libdir
+includedir=\${prefix}/include
+
+Name: kaoscleaner
+Description: CSV cleaning engine (compiled Julia) with an Arrow C Data Interface API
+URL: https://github.com/rainerrodrigues/KaosCleaner
+Version: $version
+Libs: -L\${libdir} -lkaoscleaner$(Sys.iswindows() ? "" : " -Wl,-rpath,\${libdir}")
+Cflags: -I\${includedir}
+""")
+
 # Drop DWARF debug info. Exported and function symbols stay, so crash traces
 # keep function names but lose source line numbers.
 if !Sys.iswindows() && Sys.which("strip") !== nothing
