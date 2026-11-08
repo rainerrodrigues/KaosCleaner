@@ -33,7 +33,7 @@ jobs:
         with:
           fetch-depth: 0 # needs the full history to read commit messages
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -85,7 +85,7 @@ jobs:
         run: julia build.jl
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
