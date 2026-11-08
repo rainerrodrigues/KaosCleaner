@@ -5,6 +5,19 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.5.0 (2026-11-08)
+
+### Documentation
+
+- Glibc requirement of the aarch64 wheel
+  ([`1082716`](https://github.com/rainerrodrigues/KaosCleaner/commit/10827163397761b9fee8eb0f68ec59f25479fa90))
+
+### Features
+
+- Linux aarch64 wheels and C SDK
+  ([`78c9ac4`](https://github.com/rainerrodrigues/KaosCleaner/commit/78c9ac45d76b9a5f8d946885093f4aa73fbdf219))
+
+
 ## v0.4.0 (2026-11-08)
 
 ### Documentation
