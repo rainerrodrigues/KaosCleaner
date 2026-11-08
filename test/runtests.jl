@@ -291,6 +291,12 @@ end
         o = KaosCleaner.parse_options("""{"delimiter": ";", "decimal": ",", "thousands": ".", "comment": "#"}""")
         out = clean_dataset!(load_dataset(eu, o), o)
         @test out.price == [1234.5, 12.75] && out.city == ["Köln", "Bonn"]
+        # dates with dots next to a "." thousands mark: dates, not 2012024 (groups of three only)
+        de = joinpath(dir, "de.csv")
+        write(de, "Datum;Umsatz;Stück\n02.01.2024;1.234,50;1.000\n03.01.2024;980,00;12\n")
+        o2 = KaosCleaner.parse_options("""{"delimiter": ";", "decimal": ",", "thousands": "."}""")
+        d = clean_dataset!(load_dataset(de, o2), o2)
+        @test d.datum == [Date(2024, 1, 2), Date(2024, 1, 3)] && d.umsatz == [1234.5, 980.0] && d[!, "stück"] == [1000, 12]
         hdr = joinpath(dir, "hdr.tsv")
         write(hdr, "title\nexported 2024\nid\tname\n1\tA\n2\tB\n")
         h = CleanOptions(header=3)

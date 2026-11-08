@@ -95,23 +95,54 @@ function infer_datetime(col::AbstractVector, user_formats::Vector{String})
     return out, fits[1]
 end
 
-const FORMATTED_NUMBER = r"^[-+]?[$€£¥]?[-+]?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$"
-const NUMBER_DECORATION = r"[$€£¥,]"
+"""
+    NumberFormat(decimal, thousands)
+
+How formatted numbers are written: the decimal mark and the thousands
+separator (`nothing` for none). The pattern requires proper groups of three
+digits, so `02.01.2024` is not read as a number with `.` as thousands mark.
+"""
+struct NumberFormat
+    pattern::Regex     # a whole value: sign, currency, digits, fraction
+    decoration::Regex  # what to strip before parsing: currency signs, thousands marks
+    decimal::Char
+end
+
+function NumberFormat(decimal::Char='.', thousands::Union{Nothing, Char}=',')
+    d = escape_string(string(decimal), "\\^\$.|?*+()[]{}")
+    groups = thousands === nothing ? "" : "\\d{1,3}(" * escape_string(string(thousands), "\\^\$.|?*+()[]{}") * "\\d{3})+|"
+    pattern = Regex("^[-+]?[\$€£¥]?[-+]?(" * groups * "\\d+)(" * d * "\\d+)?\$")
+    decoration = Regex("[\$€£¥" * (thousands === nothing ? "" : "\\" * thousands) * "]")
+    return NumberFormat(pattern, decoration, decimal)
+end
+
+"The number format the options describe: `.`/`,` by default, or the file's decimal and thousands marks."
+function number_format(opts::CleanOptions)
+    decimal = only(opts.decimal)
+    thousands = opts.thousands !== nothing ? only(opts.thousands) : decimal == ',' ? nothing : ','
+    return NumberFormat(decimal, thousands)
+end
+
+const DEFAULT_NUMBER_FORMAT = NumberFormat()
+
+parse_formatted(::Type{T}, x::AbstractString, f::NumberFormat) where {T} =
+    tryparse(T, replace(replace(x, f.decoration => ""), f.decimal => '.'))
 
 """
-    infer_number(col) -> Union{Nothing, Vector}
+    infer_number(col, format=DEFAULT_NUMBER_FORMAT) -> Union{Nothing, Vector}
 
 `col` as numbers if every value is a number with a currency sign and/or
-thousands separators ("\$1,250.00", "€12", "3,400"), else `nothing`.
+thousands separators ("\$1,250.00", "€12", "3,400"; "1.234,50" with a decimal
+comma), else `nothing`.
 """
-function infer_number(col::AbstractVector)
+function infer_number(col::AbstractVector, f::NumberFormat=DEFAULT_NUMBER_FORMAT)
     decorated = false
     integral = true
     for x in col
         ismissing(x) && continue
-        occursin(FORMATTED_NUMBER, x) || return nothing
-        decorated |= occursin(NUMBER_DECORATION, x)
-        integral &= !occursin('.', x)
+        occursin(f.pattern, x) || return nothing
+        decorated |= occursin(f.decoration, x) || f.decimal != '.'
+        integral &= !occursin(f.decimal, x)
     end
     decorated || return nothing  # plain numbers: CSV.jl would have parsed them
     T = integral ? Int64 : Float64
@@ -120,7 +151,7 @@ function infer_number(col::AbstractVector)
         if ismissing(x)
             out[i] = missing
         else  # tryparse: integers beyond Int64 leave the column as text
-            v = tryparse(T, replace(x, NUMBER_DECORATION => ""))
+            v = parse_formatted(T, x, f)
             v === nothing && return nothing
             out[i] = v
         end
@@ -134,7 +165,9 @@ abstract type Conversion end
 struct ToBool <: Conversion end
 struct ToNumber <: Conversion
     T::DataType
+    format::NumberFormat
 end
+ToNumber(T::DataType) = ToNumber(T, DEFAULT_NUMBER_FORMAT)
 struct ToTimestamp <: Conversion end
 "Numbers since 1970 in a unit of `scale` nanoseconds."
 struct FromEpoch <: Conversion
@@ -155,8 +188,9 @@ output_type(c::Union{ToNumber, ToDate}) = c.T
 function infer_column(col::AbstractVector, opts::CleanOptions)
     b = infer_bool(col)
     b === nothing || return b, ToBool()
-    n = infer_number(col)
-    n === nothing || return n, ToNumber(nonmissingtype(eltype(n)))
+    f = number_format(opts)
+    n = infer_number(col, f)
+    n === nothing || return n, ToNumber(nonmissingtype(eltype(n)), f)
     if isempty(opts.datetime_formats)
         t = infer_timestamp(col)
         t === nothing || return t, ToTimestamp()
@@ -235,8 +269,7 @@ end
 # Applying a known conversion to new data: values that do not fit become
 # missing (and are counted) instead of abandoning the conversion.
 convert_value(::ToBool, x) = (w = lowercase(x); w in TRUE_STRINGS ? true : w in FALSE_STRINGS ? false : nothing)
-convert_value(c::ToNumber, x) =
-    occursin(FORMATTED_NUMBER, x) ? tryparse(c.T, replace(x, NUMBER_DECORATION => "")) : nothing
+convert_value(c::ToNumber, x) = occursin(c.format.pattern, x) ? parse_formatted(c.T, x, c.format) : nothing
 convert_value(c::ToDate, x) = try_datetime(x, c.dateformat, c.T === DateTime)
 convert_value(::ToTimestamp, x) = parse_timestamp(x)
 convert_value(c::FromEpoch, x) = epoch_timestamp(x, c.scale)

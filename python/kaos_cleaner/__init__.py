@@ -17,6 +17,7 @@ parse warnings) go to the standard `logging` logger "kaos_cleaner".
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -804,7 +805,6 @@ class LiveCleaner:
         self.close()
 
     def __del__(self) -> None:
-        import contextlib
-
-        with contextlib.suppress(Exception):  # interpreter shutdown: the runtime may already be gone
-            self.close()
+        if self._id:  # at interpreter shutdown the runtime may already be gone
+            with contextlib.suppress(Exception):
+                self.close()

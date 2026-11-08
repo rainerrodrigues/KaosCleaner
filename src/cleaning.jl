@@ -26,7 +26,9 @@ function csv_options(opts::CleanOptions)
          (missingstring=vcat(MISSING_STRINGS, opts.missing_values), stripwhitespace=true,
           decimal=only(opts.decimal), header)
     opts.delimiter === nothing || (kw = (; kw..., delim=only(opts.delimiter)))
-    opts.thousands === nothing || opts.raw || (kw = (; kw..., groupmark=only(opts.thousands)))
+    # No groupmark: CSV.jl accepts it anywhere ("02.01.2024" -> 2012024), so
+    # numbers with thousands marks stay text here and type inference reads
+    # them, requiring groups of three digits (see NumberFormat).
     opts.comment === nothing || (kw = (; kw..., comment=opts.comment))
     return kw
 end

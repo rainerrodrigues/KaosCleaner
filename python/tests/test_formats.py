@@ -22,6 +22,14 @@ CLEAN = {"customer_id": [1, 2], "spend_usd": [1200.5, None], "active": [True, Fa
 # --- parsing options ---------------------------------------------------------
 
 
+def test_european_dates_are_not_numbers(tmp_path):
+    path = tmp_path / "umsatz.csv"
+    path.write_text("Datum;Umsatz\n02.01.2024;1.234,50\n03.01.2024;980,00\n")
+    df = clean_csv(path, delimiter=";", decimal=",", thousands=".")
+    assert df["datum"].to_list() == [date(2024, 1, 2), date(2024, 1, 3)]
+    assert df["umsatz"].to_list() == [1234.5, 980.0]
+
+
 def test_european_file(tmp_path):
     path = tmp_path / "umsatz.csv"
     path.write_text("# exported 2024\nName;Betrag\nA;1.234,50\nB;7,25\n")

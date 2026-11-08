@@ -33,7 +33,7 @@ These describe how a text file is written; they apply to files only (not to
 |---|---|---|
 | `delimiter` | detected | Field separator, one character: `","`, `"\t"`, `";"`, `"\|"` |
 | `decimal` | `"."` | Decimal mark in numbers, e.g. `","` for `3,14` |
-| `thousands` | none | Thousands separator inside numbers, e.g. `"."` for `1.234,50` |
+| `thousands` | none | Thousands separator inside numbers, e.g. `"."` for `1.234,50`; read by type inference, which requires groups of three digits (so `02.01.2024` stays a date) |
 | `comment` | none | Skip lines starting with this text, e.g. `"#"` |
 | `header` | `1` | Line number of the header row; lines above it are skipped. `0`: no header, columns are named `column1`, `column2`, ... |
 
