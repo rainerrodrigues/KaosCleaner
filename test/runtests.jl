@@ -1,4 +1,5 @@
 using KaosCleaner, DataFrames, Dates, JSON3, Random, Test
+using Aqua
 using KaosCleaner: ArrowSchema, ArrowArray, ArrowArrayStream
 
 # A value type whose hash is constant: distinct values collide on purpose
@@ -62,6 +63,13 @@ function export_and_read(f)
 end
 
 @testset "KaosCleaner" begin
+    @testset "package quality (Aqua.jl)" begin
+        # Ambiguities are checked for this package's own methods only:
+        # DataFrames and CSV bring many of their own that are not ours to fix.
+        Aqua.test_all(KaosCleaner; ambiguities=false)
+        Aqua.test_ambiguities(KaosCleaner; recursive=false)
+    end
+
     @testset "normalize_name" begin
         @test KaosCleaner.normalize_name(" Bill Length (mm)") == "bill_length_mm"
         @test KaosCleaner.normalize_name("***") == "column"

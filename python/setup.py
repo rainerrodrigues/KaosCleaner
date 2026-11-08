@@ -1,6 +1,6 @@
 import os
-import re
 import platform
+import re
 
 from setuptools import setup
 from setuptools.command.bdist_wheel import bdist_wheel

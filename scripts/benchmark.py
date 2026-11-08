@@ -9,6 +9,7 @@ then times each engine in its own process, so no engine's memory or warm
 caches affect another. Reports the median of the runs (after one warm-up) and
 each process's peak memory, as a Markdown table.
 """
+
 import argparse
 import os
 import random
@@ -38,8 +39,10 @@ def write_csv(path, rows, seed=1):
                 f.write(rng.choice(recent))
                 continue
             reading = "NA" if rng.random() < 0.05 else f"{rng.gauss(20, 5):.4f}"
-            line = (f"{i},{reading},{rng.choice(locations)},"
-                    f"2024-0{rng.randint(1, 9)}-1{rng.randint(0, 9)}T10:30:00,label_{rng.randint(0, 999)}\n")
+            line = (
+                f"{i},{reading},{rng.choice(locations)},"
+                f"2024-0{rng.randint(1, 9)}-1{rng.randint(0, 9)}T10:30:00,label_{rng.randint(0, 999)}\n"
+            )
             f.write(line)
             recent.append(line)
             if len(recent) > 1000:
@@ -52,6 +55,7 @@ def run_engine(engine, path, runs):
         from kaos_cleaner import clean_csv as fn
     else:
         import test_benchmark as tb
+
         fn = tb.pandas_clean if engine == "pandas" else tb.polars_clean
     rows = len(fn(path))  # warm-up (and engine start-up for kaos-cleaner)
     times = []
@@ -85,12 +89,19 @@ def main():
             size_mb = os.path.getsize(path) / 1e6
             runs = args.runs or (3 if n >= 10_000_000 else 5)
             for engine in args.engines:
-                out = subprocess.run([sys.executable, __file__, "--child", engine, path, str(runs)],
-                                     capture_output=True, text=True, check=True).stdout.split()
+                out = subprocess.run(
+                    [sys.executable, __file__, "--child", engine, path, str(runs)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.split()
                 median, peak, rows = float(out[0]), float(out[1]), int(out[2])
                 results[(n, engine)] = (median, peak, rows)
-                print(f"{n:>11,} rows ({size_mb:,.0f} MB)  {engine:13s} {median * 1000:9,.0f} ms"
-                      f"  peak {peak:7,.0f} MB  -> {rows:,} rows", file=sys.stderr)
+                print(
+                    f"{n:>11,} rows ({size_mb:,.0f} MB)  {engine:13s} {median * 1000:9,.0f} ms"
+                    f"  peak {peak:7,.0f} MB  -> {rows:,} rows",
+                    file=sys.stderr,
+                )
             os.remove(path)
 
     print("\n| Rows | " + " | ".join(args.engines) + " |")

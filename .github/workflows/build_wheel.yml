@@ -115,6 +115,25 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+      # The C SDK is the same runtime archive the wheel bundles (library,
+      # headers, Julia runtime, pkg-config file), under a descriptive name.
+      # Kept out of the wheel artifacts, which are what gets sent to PyPI.
+      - name: Package the C SDK
+        shell: bash
+        run: |
+          version=$(python -c "import sys; sys.path.insert(0, 'python'); import kaos_cleaner; print(kaos_cleaner.__version__)")
+          platform=$(python -c "import platform; print(f'{platform.system()}-{platform.machine()}'.lower())")
+          mkdir -p sdk
+          cp python/kaos_cleaner/runtime/kaos_runtime.tar.xz "sdk/libkaoscleaner-${version}-${platform}.tar.xz"
+          ls -l sdk
+
+      - name: Upload C SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-${{ matrix.os }}
+          path: sdk/*.tar.xz
+          if-no-files-found: error
+
   collect:
     needs: wheel
     if: ${{ !cancelled() && needs.wheel.result == 'success' }}
@@ -134,7 +153,7 @@ jobs:
           path: dist/*.whl
 
   release-assets:
-    name: Attach wheels to the GitHub release
+    name: Attach wheels and C SDKs to the GitHub release
     needs: [release, collect]
     if: ${{ !cancelled() && needs.release.outputs.released == 'true' && needs.collect.result == 'success' }}
     runs-on: ubuntu-latest
@@ -147,11 +166,18 @@ jobs:
           name: kaos-cleaner-wheels
           path: dist
 
+      - name: Download C SDKs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sdk-*
+          merge-multiple: true
+          path: sdk
+
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release.outputs.tag }}
-        run: gh release upload "$TAG" dist/*.whl --repo "$GITHUB_REPOSITORY" --clobber
+        run: gh release upload "$TAG" dist/*.whl sdk/*.tar.xz --repo "$GITHUB_REPOSITORY" --clobber
 
   # Trusted Publishing (OIDC): no API token is stored anywhere. Each index
   # needs a (pending) publisher for this repo and workflow build_wheel.yml,

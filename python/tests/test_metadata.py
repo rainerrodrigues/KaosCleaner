@@ -1,8 +1,9 @@
 """Package metadata checks that PyPI enforces only at upload time."""
-import tomllib
+
 from pathlib import Path
 
 import pytest
+import tomllib
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 

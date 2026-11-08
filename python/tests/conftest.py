@@ -4,6 +4,7 @@ Tests run against an installed kaos-cleaner wheel when there is one (CI), and
 otherwise against python/kaos_cleaner plus kaos_binaries/ in this checkout.
 Test data is generated per test in tmp_path.
 """
+
 import os
 import random
 import sys

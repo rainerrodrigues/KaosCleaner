@@ -6,12 +6,12 @@ does the same cleaning as kaos_cleaner, so the comparison is like for like.
 
     pytest python/tests/test_benchmark.py --benchmark-columns=min,mean,stddev
 """
+
 import random
 import re
 import time
 
 import pytest
-
 from kaos_cleaner import clean_csv
 
 pd = pytest.importorskip("pandas")
@@ -29,8 +29,9 @@ def bench_csv(tmp_path_factory):
     for i in range(ROWS):
         reading = "NA" if rng.random() < 0.05 else f"{rng.gauss(20, 5):.4f}"
         loc = rng.choice(["loc_1", " loc_2", "loc_3 ", "N/A", ""])
-        lines.append(f"{i},{reading},{loc},2024-0{rng.randint(1, 9)}-1{rng.randint(0, 9)}T10:30:00,"
-                     f"label_{rng.randint(0, 999)}")
+        lines.append(
+            f"{i},{reading},{loc},2024-0{rng.randint(1, 9)}-1{rng.randint(0, 9)}T10:30:00,label_{rng.randint(0, 999)}"
+        )
     lines += rng.sample(lines[1:], ROWS // 50)
     path = tmp_path_factory.mktemp("bench") / "bench.csv"
     path.write_text("\n".join(lines) + "\n")

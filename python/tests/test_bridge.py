@@ -5,17 +5,17 @@ threading bug deadlocks it, so the hostile-input and thread tests run in a
 child process with a timeout: a crash or hang then shows up as one failed
 test with the child's fault trace, instead of killing or stalling pytest.
 """
+
 import json
 import os
 import subprocess
 import sys
 from datetime import datetime
 
+import kaos_cleaner
 import polars as pl
 import pyarrow as pa
 import pytest
-
-import kaos_cleaner
 from kaos_cleaner import clean_csv, process_dataset
 
 
@@ -84,8 +84,9 @@ except RuntimeError as e:
 def _run_isolated(path):
     pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(kaos_cleaner.__file__)))
     env = dict(os.environ, PYTHONPATH=pkg_parent)
-    return subprocess.run([sys.executable, "-X", "faulthandler", "-c", _CHILD, path],
-                          capture_output=True, text=True, env=env, timeout=300)
+    return subprocess.run(
+        [sys.executable, "-X", "faulthandler", "-c", _CHILD, path], capture_output=True, text=True, env=env, timeout=300
+    )
 
 
 def test_hostile_input_never_crashes(hostile_csv):
@@ -140,9 +141,13 @@ def test_concurrent_calls(valid_csv, messy_csv):
     """
     pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(kaos_cleaner.__file__)))
     try:
-        child = subprocess.run([sys.executable, "-X", "faulthandler", "-c", _THREADS_CHILD, valid_csv, messy_csv],
-                               capture_output=True, text=True, timeout=180,
-                               env=dict(os.environ, PYTHONPATH=pkg_parent))
+        child = subprocess.run(
+            [sys.executable, "-X", "faulthandler", "-c", _THREADS_CHILD, valid_csv, messy_csv],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=dict(os.environ, PYTHONPATH=pkg_parent),
+        )
     except subprocess.TimeoutExpired:
         pytest.fail("threads deadlocked: no result within 180s")
     assert child.returncode == 0 and child.stdout.strip() == "ok", child.stderr[-3000:]
@@ -174,6 +179,7 @@ def test_memory_stays_flat(valid_csv):
 
 # --- options, logging and streaming -----------------------------------------
 
+
 def test_options_reach_the_engine(messy_csv):
     df = clean_csv(messy_csv, drop=["Customer ID"], impute={"spend_usd": "zero"}, dedupe=False)
 
@@ -185,7 +191,7 @@ def test_options_reach_the_engine(messy_csv):
 
 def test_type_inference_from_python(tmp_path):
     path = tmp_path / "typed.csv"
-    path.write_text("Paid,Amount,Day\nYes,\"$1,200.50\",13/01/2024\nno,€3,02/02/2024\n")
+    path.write_text('Paid,Amount,Day\nYes,"$1,200.50",13/01/2024\nno,€3,02/02/2024\n')
     df = clean_csv(str(path))
 
     assert df.schema == {"paid": pl.Boolean, "amount": pl.Float64, "day": pl.Date}

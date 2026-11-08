@@ -6,6 +6,7 @@ The Julia runtime is looked up in this order:
 3. the runtime archive bundled in the wheel, unpacked once into a user cache
    directory (wheels are zip files and cannot hold the runtime's symlinks).
 """
+
 from __future__ import annotations
 
 import ctypes

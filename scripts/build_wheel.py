@@ -6,6 +6,7 @@
 The runtime is xz-compressed (~40% smaller than gzip, but takes minutes to
 pack); --gzip packs in seconds for quick local test wheels.
 """
+
 import argparse
 import os
 import platform
@@ -60,10 +61,10 @@ def main():
     shutil.rmtree(RUNTIME, ignore_errors=True)
     RUNTIME.mkdir(parents=True)
     if args.gzip:
-        archive = tarfile.open(RUNTIME / "kaos_runtime.tar.gz", "w:gz", compresslevel=6)
+        name, mode, options = "kaos_runtime.tar.gz", "w:gz", {"compresslevel": 6}
     else:
-        archive = tarfile.open(RUNTIME / "kaos_runtime.tar.xz", "w:xz", preset=6)
-    with archive as tar:
+        name, mode, options = "kaos_runtime.tar.xz", "w:xz", {"preset": 6}
+    with tarfile.open(RUNTIME / name, mode, **options) as tar:
         for child in sorted(BINARIES.iterdir()):
             tar.add(child, arcname=child.name)
 
@@ -74,8 +75,9 @@ def main():
     # Wheels only: an sdist would make pip on other platforms install a
     # runtime built for the wrong OS.
     shutil.rmtree(PACKAGE / "build", ignore_errors=True)
-    subprocess.run([sys.executable, "-m", "build", "--wheel", "--outdir", str(ROOT / "dist"), str(PACKAGE)],
-                   check=True, env=env)
+    subprocess.run(
+        [sys.executable, "-m", "build", "--wheel", "--outdir", str(ROOT / "dist"), str(PACKAGE)], check=True, env=env
+    )
 
 
 if __name__ == "__main__":

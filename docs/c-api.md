@@ -5,9 +5,31 @@ language that can call C and read Arrow data can use it: C, C++, Rust, Go, R,
 Java through the Arrow C Data Interface. The Python package is one such
 caller.
 
+## Getting the SDK
+
+Each [GitHub release](https://github.com/rainerrodrigues/KaosCleaner/releases)
+has a C SDK per platform, `libkaoscleaner-<version>-<os>-<arch>.tar.xz`
+(for example `libkaoscleaner-0.1.5-linux-x86_64.tar.xz`). Unpack it anywhere
+and build against it with pkg-config:
+
+```bash
+mkdir kaoscleaner && tar -xJf libkaoscleaner-*-linux-x86_64.tar.xz -C kaoscleaner
+```
+```bash
+export PKG_CONFIG_PATH=$PWD/kaoscleaner/lib/pkgconfig
+```
+```bash
+cc myprogram.c $(pkg-config --cflags --libs kaoscleaner) -o myprogram
+```
+
+The pkg-config file is relocatable and adds an rpath on Linux and macOS, so
+the program finds the library in the unpacked directory without
+`LD_LIBRARY_PATH`. On Windows, link against `bin/libkaoscleaner.dll` and keep
+the `bin/` directory next to your program or on `PATH`.
+
 ## Files
 
-A build (`julia build.jl`, or the runtime inside a wheel) contains:
+An SDK (or a local build with `julia build.jl`) contains:
 
 | Path | What |
 |---|---|
@@ -15,6 +37,7 @@ A build (`julia build.jl`, or the runtime inside a wheel) contains:
 | `lib/`, `lib/julia/`, `bin/` | The Julia runtime it loads |
 | `include/kaoscleaner.h` | This API, including the Arrow struct definitions |
 | `include/julia_init.h` | PackageCompiler's plain `init_julia` |
+| `lib/pkgconfig/kaoscleaner.pc` | pkg-config file |
 | `share/` | Runtime data and third-party licenses |
 
 Keep the directory together: the library finds its runtime relative to

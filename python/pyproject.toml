@@ -38,3 +38,14 @@ packages = ["kaos_cleaner", "kaos_cleaner.runtime"]
 
 [tool.setuptools.dynamic]
 version = { attr = "kaos_cleaner.__version__" }
+
+[tool.mypy]
+python_version = "3.10"  # oldest mypy can check; the package still supports 3.9
+files = ["kaos_cleaner"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["pyarrow.*"]  # pyarrow ships no type information
+ignore_missing_imports = true
