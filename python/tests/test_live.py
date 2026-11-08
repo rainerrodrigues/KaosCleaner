@@ -1,6 +1,5 @@
 """Tests for LiveCleaner: state kept between batches."""
 
-import pandas as pd
 import polars as pl
 import pyarrow as pa
 import pytest
@@ -19,6 +18,7 @@ def test_types_dedupe_ffill_and_rows_carry_over():
 
 
 def test_same_kind_back():
+    pd = pytest.importorskip("pandas")  # not installed in the wheel test job
     with LiveCleaner() as cleaner:
         assert isinstance(cleaner.clean(pa.record_batch({"a": [1]})), pa.RecordBatch)
         assert isinstance(cleaner.clean(pa.table({"a": [2]})), pa.Table)
