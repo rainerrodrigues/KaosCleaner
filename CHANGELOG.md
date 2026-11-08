@@ -5,6 +5,19 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.4.0 (2026-11-08)
+
+### Documentation
+
+- Pipeline diagram on the How it works page
+  ([`0af1d46`](https://github.com/rainerrodrigues/KaosCleaner/commit/0af1d4624589bd2ee68f2ecbfc707f266556bbd3))
+
+### Features
+
+- Undo the cleaning with source_row and restore
+  ([`e8ef3aa`](https://github.com/rainerrodrigues/KaosCleaner/commit/e8ef3aa6cb2638694d4feb21976809949e2434e1))
+
+
 ## v0.3.0 (2026-11-08)
 
 ### Features
