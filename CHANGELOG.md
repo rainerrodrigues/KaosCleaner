@@ -5,6 +5,32 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.7.0 (2026-11-08)
+
+### Bug Fixes
+
+- Dotted dates read as numbers with a "." thousands separator
+  ([`db894a8`](https://github.com/rainerrodrigues/KaosCleaner/commit/db894a884429c259ccfba323f88340bf9ed91826))
+
+### Documentation
+
+- Step-by-step CompatHelper setup
+  ([`ed18020`](https://github.com/rainerrodrigues/KaosCleaner/commit/ed1802056f1f17348b856c9b00b18ec403c002fd))
+
+- Tutorials
+  ([`9c94516`](https://github.com/rainerrodrigues/KaosCleaner/commit/9c9451649ea2ecaca3b79584f75330d4ade49591))
+
+### Features
+
+- Outliers, resampling, time-aware interpolation and live sessions
+  ([`7c3f64e`](https://github.com/rainerrodrigues/KaosCleaner/commit/7c3f64eaa761fcf8dbb76488c92d8b5606eca769))
+
+### Performance Improvements
+
+- Leave docstrings and source text out of the library
+  ([`7465308`](https://github.com/rainerrodrigues/KaosCleaner/commit/746530869f660ab1c0d3121d2cef3b6d67e8901d))
+
+
 ## v0.6.0 (2026-11-08)
 
 ### Features

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 PathLike = Union[str, "os.PathLike[str]"]
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 __all__ = [
     "clean_csv",
     "clean_file",
