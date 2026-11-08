@@ -62,8 +62,9 @@ for batch in iter_clean_csv("huge.csv"):            # pyarrow.RecordBatch stream
   cache directory (`~/.cache/kaos_cleaner` on Linux, `~/Library/Caches` on
   macOS, `%LOCALAPPDATA%` on Windows). This takes a few seconds once; later
   imports start in well under a second.
-- **Platforms:** wheels are built for Linux x86_64 (glibc 2.17+), Windows
-  x86_64 and macOS arm64. There is no source distribution.
+- **Platforms:** wheels are built for Linux x86_64 (glibc 2.17+), Linux
+  aarch64 (64-bit ARM: Jetson, Raspberry Pi OS 64-bit), Windows x86_64 and
+  macOS arm64. There is no source distribution.
 - **Threads:** parsing uses all CPU cores (set `KAOSCLEANER_THREADS` to limit); calls are serialized, so it is safe to call from several threads.
 - Set `KAOSCLEANER_HOME` to a `kaos_binaries/` directory to use your own build
   of the engine.

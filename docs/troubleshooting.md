@@ -24,9 +24,10 @@ again automatically.
 ## "is not a supported wheel on this platform"
 
 The wheel does not match your OS or CPU. Wheels exist for Linux x86_64 with
-glibc 2.17 or newer, Windows x86_64, and macOS 11+ on Apple silicon. Intel
-Macs, Linux on ARM and musl-based distributions (Alpine) are not supported
-yet.
+glibc 2.17 or newer, Linux aarch64 (64-bit ARM), Windows x86_64, and macOS
+11+ on Apple silicon. Intel Macs, 32-bit ARM (armv7, such as 32-bit
+Raspberry Pi OS) and musl-based distributions (Alpine) are not supported
+yet; on a Raspberry Pi, install the 64-bit OS.
 
 ## A column was not converted to dates or booleans
 

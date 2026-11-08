@@ -70,8 +70,9 @@ were dropped.
 pip install kaos-cleaner
 ```
 
-Wheels are published for Linux x86_64 (glibc 2.17+), Windows x86_64 and macOS
-11+ on Apple silicon, for Python 3.9 and newer; each is also attached to its
+Wheels are published for Linux x86_64 (glibc 2.17+), Linux aarch64 (64-bit
+ARM: Jetson, Raspberry Pi OS 64-bit, Graviton), Windows x86_64 and macOS 11+
+on Apple silicon, for Python 3.9 and newer; each is also attached to its
 [GitHub release](https://github.com/rainerrodrigues/KaosCleaner/releases).
 
 The first call unpacks the bundled Julia runtime (about 500 MB) into your user
