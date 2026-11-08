@@ -1,20 +1,6 @@
 # How it works
 
-```text
- Python                         │  libkaoscleaner (compiled Julia)
-                                │
- clean_csv("data.csv", ...)     │
-   │  options → JSON            │
-   └──── process_dataset_with_options(path, json, schema*, array*) ──►
-                                │   CSV.jl: parse with all CPU threads
-                                │   clean, infer types, dedupe, impute
-                                │   write columns into malloc'd Arrow buffers
-   ◄──────────── fills ArrowSchema / ArrowArray structs ────────────────
-   pyarrow imports the buffers  │
-   (no copy, no serialisation)  │
-   polars.from_arrow(...)       │
-   …later: table dropped ───── release() callback frees the buffers ──►
-```
+![The Python runtime passes the file path and JSON options across the C ABI to libkaoscleaner, which parses, infers types, cleans, deduplicates and imputes on all CPU threads, writes the result into Arrow record batches, and hands back pointers that PyArrow and Polars read without copying; a release callback frees the buffers.](assets/pipeline.jpg)
 
 ## The engine
 
