@@ -51,7 +51,7 @@ jobs:
         with:
           version: '1.12.6' # exactly the Julia version Manifest.toml was resolved with
 
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
 
       - name: Use the newest compatible Julia packages (weekly run)
         if: github.event_name == 'schedule'
