@@ -69,6 +69,7 @@ function stream_plan(path::AbstractString, opts::CleanOptions)
     select_columns!(sample, opts)
     clean_strings!(sample, Markers(opts.missing_values))
     conversions = opts.infer_types ? infer_types!(sample, opts) : Dict{String, Conversion}()
+    merge!(conversions, apply_epochs!(sample, opts))
     plan = map(names(sample)) do name
         source = source_of[name]
         conversion = get(conversions, name, nothing)
@@ -228,6 +229,8 @@ function coerce_value(::Type{T}, x) where {T}
         return T(x)
     elseif T === DateTime && x isa Date
         return DateTime(x)
+    elseif T === Timestamp && x isa Union{Date, DateTime}
+        return Timestamp(x)
     end
     return nothing
 end

@@ -1,7 +1,7 @@
 # Cleaning options. Python passes them as a JSON object (clean_csv's keyword
 # arguments); every key is validated here so typos fail loudly.
 
-const IMPUTE_STRATEGIES = ("mean", "median", "mode", "zero", "ffill", "bfill")
+const IMPUTE_STRATEGIES = ("mean", "median", "mode", "zero", "ffill", "bfill", "interpolate")
 
 Base.@kwdef struct CleanOptions
     "Columns to remove (original or snake_case names)."
@@ -32,6 +32,8 @@ Base.@kwdef struct CleanOptions
     comment::Union{Nothing, String} = nothing
     "Line number of the header row (lines above it are skipped); 0 when the file has none."
     header::Int = 1
+    "Numeric columns holding times since 1970, as column => unit (s, ms, us or ns); converted to timestamps."
+    epoch::Dict{String, String} = Dict{String, String}()
     "Add a first column `source_row`: each row's position among the input's data rows (1 = first)."
     source_row::Bool = false
     "Read a file as it is: every column as untrimmed text, no missing markers, no cleaning steps."
@@ -85,6 +87,16 @@ function option_value(key::Symbol, value)
         (strings isa AbstractVector && all(s -> s isa AbstractString, strings)) ||
             throw(ArgumentError("option `$key` must be a string or a list of strings"))
         return String.(strings)
+    elseif key == :epoch
+        value isa JSON3.Object ||
+            throw(ArgumentError("option `epoch` must be a {column: unit} mapping, e.g. {\"stamp\": \"ns\"}"))
+        units = Dict{String, String}()
+        for (k, v) in value
+            v isa AbstractString && haskey(EPOCH_UNITS, v) ||
+                throw(ArgumentError("epoch unit for `$k` must be one of s, ms, us, ns; got $(repr(v))"))
+            units[String(k)] = String(v)
+        end
+        return units
     else # :impute
         if value isa AbstractString
             return check_strategy(value)

@@ -15,6 +15,7 @@ problem.
 | `infer_types` | `True` | Convert text columns holding booleans, dates or formatted numbers |
 | `datetime_formats` | none | Date formats to use, e.g. `["dd/mm/yyyy"]` |
 | `impute` | none | Fill missing values (strategy, or `{column: strategy}`) |
+| `epoch` | none | Numeric columns holding times since 1970, as `{column: unit}` (`s`, `ms`, `us`, `ns`); see [Sensor data](sensor-data.md) |
 | `source_row` | `False` | Add a first column with each row's position in the source; see [Undo the cleaning](restore.md) |
 
 ### Parsing options
@@ -76,6 +77,10 @@ non-missing value fits one of these rules; otherwise the column stays text.
 separators: `$1,250.00`, `€12`, `3,400`. Columns become integers when no value
 has a decimal point, floats otherwise. Percentages and decimal commas
 (`12,5`) are left as text, because they cannot be read unambiguously.
+
+**Timestamps with fractions of a second** in ISO 8601
+(`2024-01-31T10:30:00.123456`, `2024-01-31 10:30:00.5`) become nanosecond
+timestamps; see [Sensor and robot data](sensor-data.md).
 
 **Dates** in these formats, with or without a time:
 

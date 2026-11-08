@@ -100,7 +100,7 @@ int kaos_open_stream(const char* filepath, const char* options_json, int64_t chu
  * Clean a table already in memory: in_schema/in_array hold a record batch
  * (struct array, format "+s") exported through the Arrow C Data Interface.
  * Supported column formats: n, b, c C s S i I l L f g, u U, tdD, tdm and
- * ts{s,m,u,n}: without a time zone. The library always releases the input,
+ * ts{s,m,u,n}: without a time zone (tsu: and tsn: keep full precision). The library always releases the input,
  * also on failure. Options as for process_dataset_with_options, except the
  * file parsing options (delimiter, decimal, thousands, comment, header),
  * which are ignored. Returns 0 on success (the caller then owns out_schema

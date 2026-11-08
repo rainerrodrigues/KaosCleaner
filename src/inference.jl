@@ -135,6 +135,11 @@ struct ToBool <: Conversion end
 struct ToNumber <: Conversion
     T::DataType
 end
+struct ToTimestamp <: Conversion end
+"Numbers since 1970 in a unit of `scale` nanoseconds."
+struct FromEpoch <: Conversion
+    scale::Int
+end
 struct ToDate <: Conversion
     format::String
     dateformat::DateFormat
@@ -143,6 +148,7 @@ end
 ToDate(format::String) = ToDate(format, DateFormat(format), has_time(format) ? DateTime : Date)
 
 output_type(::ToBool) = Bool
+output_type(::Union{ToTimestamp, FromEpoch}) = Timestamp
 output_type(c::Union{ToNumber, ToDate}) = c.T
 
 "`col` converted and the conversion used, or `nothing` if no conversion fits."
@@ -151,9 +157,59 @@ function infer_column(col::AbstractVector, opts::CleanOptions)
     b === nothing || return b, ToBool()
     n = infer_number(col)
     n === nothing || return n, ToNumber(nonmissingtype(eltype(n)))
+    if isempty(opts.datetime_formats)
+        t = infer_timestamp(col)
+        t === nothing || return t, ToTimestamp()
+    end
     d = infer_datetime(col, opts.datetime_formats)
     d === nothing || return d[1], ToDate(d[2])
     return nothing
+end
+
+"""
+    infer_timestamp(col) -> Union{Nothing, Vector}
+
+`col` as nanosecond `Timestamp`s if every value is an ISO 8601 date and time
+and at least one has a fraction of a second CSV.jl did not read
+(`2024-01-31T10:30:00.123456`, `2024-01-31 10:30:00.25`), else `nothing`.
+"""
+function infer_timestamp(col::AbstractVector)
+    out = Vector{Union{Missing, Timestamp}}(undef, length(col))
+    fraction = false
+    for (i, x) in enumerate(col)
+        if ismissing(x)
+            out[i] = missing
+            continue
+        end
+        t = parse_timestamp(x)
+        t === nothing && return nothing
+        fraction |= t.ns % 1_000_000_000 != 0 || occursin('.', x) || occursin(',', x)
+        out[i] = t
+    end
+    return fraction ? out : nothing
+end
+
+"""
+    apply_epochs!(df, opts) -> Dict{String, Conversion}
+
+Convert the columns named in `opts.epoch` (numbers since 1970) to `Timestamp`s.
+"""
+function apply_epochs!(df::DataFrame, opts::CleanOptions)
+    conversions = Dict{String, Conversion}()
+    for (name, unit) in opts.epoch
+        name in names(df) || throw(ArgumentError("epoch: no column named $name; columns are: $(join(names(df), ", "))"))
+        col = df[!, name]
+        T = nonmissingtype(eltype(col))
+        (T === Union{} || (T <: Real && !(T <: Bool))) ||
+            throw(ArgumentError("epoch: `$name` must hold numbers, it is $T"))
+        c = FromEpoch(EPOCH_UNITS[unit])
+        out, failures = apply_conversion(c, col)
+        failures > 0 && @warn "$failures value$(failures == 1 ? "" : "s") in `$name` were out of range for a timestamp and became missing"
+        df[!, name] = out
+        conversions[name] = c
+        @info "Converted column `$name` from $unit since 1970 to timestamps"
+    end
+    return conversions
 end
 
 """
@@ -182,6 +238,8 @@ convert_value(::ToBool, x) = (w = lowercase(x); w in TRUE_STRINGS ? true : w in 
 convert_value(c::ToNumber, x) =
     occursin(FORMATTED_NUMBER, x) ? tryparse(c.T, replace(x, NUMBER_DECORATION => "")) : nothing
 convert_value(c::ToDate, x) = try_datetime(x, c.dateformat, c.T === DateTime)
+convert_value(::ToTimestamp, x) = parse_timestamp(x)
+convert_value(c::FromEpoch, x) = epoch_timestamp(x, c.scale)
 
 """
     apply_conversion(c, col) -> (Vector, failures)
@@ -222,7 +280,7 @@ function impute!(df::DataFrame, opts::CleanOptions)
         col = df[!, name]
         any(ismissing, col) || continue
         numeric = nonmissingtype(eltype(col)) <: Real && !(nonmissingtype(eltype(col)) <: Bool)
-        if strategy in ("mean", "median", "zero") && !numeric
+        if strategy in ("mean", "median", "zero", "interpolate") && !numeric
             explicit && throw(ArgumentError("impute: `$strategy` needs a numeric column, `$name` is $(nonmissingtype(eltype(col)))"))
             continue
         end
@@ -241,6 +299,7 @@ function impute(col::AbstractVector, strategy::String)
         return fill_direction(col, strategy == "ffill")
     end
     strategy == "zero" && return fill_zero(col)
+    strategy == "interpolate" && return interpolate_linear(col)
     value = strategy == "mean" ? mean(present) :
             strategy == "median" ? median(present) :
             mode_value(present)
@@ -256,6 +315,35 @@ function mode_value(values::AbstractVector)
         n > best_n && ((best, best_n) = (v, n))
     end
     return best
+end
+
+"""
+    interpolate_linear(col) -> Vector{Union{Missing, Float64}}
+
+Missing values between two present ones filled on the straight line between
+them, by row position (rows are assumed evenly spaced, as for a sensor sampled
+at a fixed rate). Missing values before the first or after the last present
+value stay missing.
+"""
+function interpolate_linear(col::AbstractVector)
+    out = Vector{Union{Missing, Float64}}(undef, length(col))
+    prev = 0  # index of the last present value
+    for i in eachindex(col)
+        x = col[i]
+        if ismissing(x)
+            out[i] = missing
+            continue
+        end
+        out[i] = Float64(x)
+        if prev > 0 && i - prev > 1
+            a, b = out[prev], out[i]
+            for k in prev+1:i-1
+                out[k] = a + (b - a) * (k - prev) / (i - prev)
+            end
+        end
+        prev = i
+    end
+    return out
 end
 
 "Missing values of a numeric column replaced by zero."

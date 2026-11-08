@@ -80,8 +80,13 @@ function import_column(s::ArrowSchema, a::ArrowArray, off::Int, n::Int)
     elseif startswith(format, "ts") && length(format) >= 4 && format[4] == ':'
         length(format) == 4 ||
             throw(ArgumentError("timestamps with a time zone are not supported; convert them to UTC first"))
-        scale = TIMESTAMP_UNITS[format[3]]
         ticks = Ptr{Int64}(buffer(2))
+        if format[3] in ('u', 'n')  # beyond DateTime's milliseconds: keep every digit
+            per_tick = format[3] == 'u' ? 1_000 : 1
+            get_ns = i -> Timestamp(Base.checked_mul(unsafe_load(ticks, off + i), per_tick))
+            return collect_column(get_ns, valid, n, Timestamp, nulls)
+        end
+        scale = TIMESTAMP_UNITS[format[3]]
         get_time = i -> DateTime(1970) + Millisecond(round(Int64, unsafe_load(ticks, off + i) * scale, RoundDown))
         return collect_column(get_time, valid, n, DateTime, nulls)
     end
