@@ -125,9 +125,33 @@ message that counts.
 
 | Workflow | When | What |
 |---|---|---|
-| `ci.yml` | Every pull request | Julia tests, Linux engine build, Python tests, speed gate against pandas |
+| `ci.yml` | Every pull request; Mondays on `main` | Julia tests, Linux engine build, Python tests, speed gate against pandas. The weekly run first updates to the newest compatible Julia packages and installs the latest Python packages |
 | `docs.yml` | PRs and `main` touching docs or the Python package | Strict docs build; deploy to GitHub Pages from `main` |
 | `build_wheel.yml` | Every push to `main`, or manually | Release (see below); manual runs on a branch build and test all wheels without releasing |
+| `codeql.yml` | PRs, `main`, Mondays | CodeQL security analysis of the Python package and the workflows |
+| `dependabot-automerge.yml` | When CI or Docs finishes on a Dependabot PR | Merges minor and patch updates once every check passed; majors wait for review |
+| `compathelper.yml` | Mondays, or manually | Opens PRs when Julia dependencies release versions outside `[compat]` |
+
+## Automated maintenance
+
+Most upkeep runs without you:
+
+- **Dependabot** opens weekly PRs for GitHub Actions and the docs toolchain.
+  Minor and patch updates merge themselves once CI and Docs pass; major
+  updates stay open for review, since they can change behaviour.
+- **CompatHelper** does the same for the Julia dependencies' `[compat]`
+  bounds; see [Setting up CompatHelper](#setting-up-compathelper).
+- **The weekly CI run** tests `main` against the newest packages, so an
+  upstream release that breaks the engine shows up as a failed run (GitHub
+  emails you) before users report it.
+- **CodeQL** scans every change and weekly for security issues.
+- **semantic-release** versions, tags and publishes; only the PyPI step
+  waits for your approval.
+
+None of these commits are `feat:` or `fix:`, so maintenance alone never
+cuts a release. TagBot is not used: semantic-release already tags each
+version and keeps `Project.toml` in step, which is what Julia's registry
+needs.
 
 To test the Windows and macOS wheels of a branch before merging:
 
@@ -160,6 +184,74 @@ PyPI enforces two things only at upload time, so both are checked earlier:
   get there (Linux ~81 MiB, Windows ~74 MiB, macOS ~68 MiB).
 - **Classifiers**: every classifier in `python/pyproject.toml` must be on
   PyPI's official list; `python/tests/test_metadata.py` checks this in CI.
+
+## Setting up CompatHelper
+
+CompatHelper checks every Monday whether a Julia dependency has released a
+version outside the `[compat]` bounds in `Project.toml`, and opens a pull
+request that widens the bound. CI on that pull request then shows whether
+the new version works. Setup takes three steps.
+
+**1. Let GitHub Actions open pull requests.** Settings → Actions → General
+→ *Workflow permissions*: tick **Allow GitHub Actions to create and approve
+pull requests**, and save. Or from a terminal:
+
+```bash
+gh api -X PUT repos/rainerrodrigues/KaosCleaner/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true
+```
+
+The default token stays read-only; each workflow asks for the permissions
+it needs.
+
+**2. Give it a deploy key, so CI runs on its pull requests.** GitHub does
+not start workflows for pushes made with the workflow's own token. Pushing
+over SSH with a deploy key avoids that. Create a key pair without a
+passphrase, in a temporary directory:
+
+```bash
+ssh-keygen -t ed25519 -N "" -C compathelper -f compathelper_key
+```
+
+Add the public half as a deploy key with write access (Settings → Deploy
+keys → Add deploy key, paste `compathelper_key.pub`, tick *Allow write
+access*), or:
+
+```bash
+gh repo deploy-key add compathelper_key.pub --allow-write --title CompatHelper
+```
+
+Store the private half as the secret `COMPATHELPER_PRIV` (Settings →
+Secrets and variables → Actions → New repository secret), or:
+
+```bash
+gh secret set COMPATHELPER_PRIV < compathelper_key
+```
+
+Then delete both files; GitHub keeps the only copies it needs:
+
+```bash
+rm compathelper_key compathelper_key.pub
+```
+
+Without the deploy key, CompatHelper still opens pull requests, but CI does
+not start on them until you push a commit to the branch.
+
+**3. Run it once to check.** It runs every Monday; start it now with:
+
+```bash
+gh workflow run compathelper.yml
+```
+
+```bash
+gh run list --workflow compathelper.yml --limit 1
+```
+
+A green run with no new pull request means every dependency is within its
+bounds. When it does open one, merge it once CI passes; its commits are not
+Conventional Commits, so this never cuts a release. It changes only the
+allowed versions: the compiled library keeps the exact versions pinned in
+`Manifest.toml` until you run `julia --project=. -e "using Pkg; Pkg.update()"`
+and commit the result (the weekly CI run already tests the newest versions).
 
 ## Publishing to Julia's General registry
 

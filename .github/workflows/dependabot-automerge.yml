@@ -1,0 +1,50 @@
+name: Dependabot auto-merge
+
+# Merges Dependabot's minor and patch updates once every check on the pull
+# request has passed. Major updates (which may change behaviour) stay open
+# for a person to review.
+#
+# Runs when CI or Docs finishes, rather than on the pull request itself, so
+# the merge waits for the checks; the last workflow to finish does the merge.
+# Dependabot commits are `ci:` or `docs:`, so merging never cuts a release.
+# A merge made with GITHUB_TOKEN does not start other workflows; the docs
+# site picks up a toolchain bump with the next push to main.
+on:
+  workflow_run:
+    workflows: [CI, Docs]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge minor and patch updates whose checks all passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          pr=$(gh pr list --head "$HEAD_BRANCH" --state open --json number,author \
+                 --jq '.[] | select(.author.login == "app/dependabot") | .number')
+          if [ -z "$pr" ]; then echo "No open Dependabot pull request for $HEAD_BRANCH"; exit 0; fi
+          title=$(gh pr view "$pr" --json title --jq .title)
+          # "ci: Bump actions/checkout from 4.1.0 to 4.2.0": compare the major versions
+          if [[ ! "$title" =~ from\ v?([0-9]+)[^\ ]*\ to\ v?([0-9]+) ]]; then
+            echo "Could not read the versions from: $title"; exit 0
+          fi
+          if [ "${BASH_REMATCH[1]}" != "${BASH_REMATCH[2]}" ]; then
+            echo "Major update (${BASH_REMATCH[1]} -> ${BASH_REMATCH[2]}); leaving #$pr for review"; exit 0
+          fi
+          # 0 only when every check passed; 8 while some are still running
+          if ! gh pr checks "$pr" > /dev/null; then
+            echo "Not every check on #$pr has passed yet"; exit 0
+          fi
+          gh pr merge "$pr" --merge

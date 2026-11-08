@@ -3,18 +3,25 @@ name: CI
 # Checks every pull request before it can reach main (and so a release):
 # Julia tests, a Linux build of libkaoscleaner, then the Python bridge tests
 # and the speed gate against pandas, all on the same runner.
+#
+# Every Monday it also runs on main against the newest compatible Julia
+# packages and the latest Python packages, so an upstream release that breaks
+# something shows up as a failed run (GitHub emails the repository owner)
+# before users hit it.
 on:
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '17 4 * * 1'
   workflow_dispatch:
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -33,13 +40,17 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12.6' # exactly the Julia version Manifest.toml was resolved with
 
       - uses: julia-actions/cache@v2
+
+      - name: Use the newest compatible Julia packages (weekly run)
+        if: github.event_name == 'schedule'
+        run: julia --project=. -e "using Pkg; Pkg.update()"
 
       - name: Julia tests
         run: julia --project=. -e "using Pkg; Pkg.instantiate(); Pkg.test()"
@@ -47,7 +58,7 @@ jobs:
       - name: Compile libkaoscleaner
         run: julia build.jl
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
