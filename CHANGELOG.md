@@ -5,6 +5,14 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.6.0 (2026-11-08)
+
+### Features
+
+- Nanosecond timestamps, epoch columns and interpolation for sensor data
+  ([`0ab65a2`](https://github.com/rainerrodrigues/KaosCleaner/commit/0ab65a2a7714c9dcff682d5497878e7f08250ecc))
+
+
 ## v0.5.0 (2026-11-08)
 
 ### Documentation
