@@ -1,6 +1,6 @@
 # kaos-cleaner
 
-Fast CSV cleaning for Python, powered by a pre-compiled Julia engine. Results
+Fast CSV and tabular data cleaning for Python, powered by a pre-compiled Julia engine. Results
 come back through the Arrow C Data Interface as a `pyarrow.Table` or a
 `polars.DataFrame`, with no Julia installation needed.
 
@@ -35,6 +35,16 @@ Full documentation: https://rainerrodrigues.github.io/KaosCleaner/
 Every step is an option. Errors (a missing file, an invalid option) are raised
 as `RuntimeError` with the engine's message; the engine's notes (rows dropped,
 columns converted) go to the `logging` logger `"kaos_cleaner"`.
+
+## Other formats and in-memory data
+
+```python
+from kaos_cleaner import clean_file, clean_table
+
+df = clean_file("orders.tsv")                 # also .csv.gz, .parquet, .arrow, .jsonl, .json, .xlsx
+df = clean_csv("umsatz.csv", delimiter=";", decimal=",", thousands=".")
+df = clean_table(pandas_or_polars_or_arrow)   # returns the same kind
+```
 
 ## Files larger than memory
 

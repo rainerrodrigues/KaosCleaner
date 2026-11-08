@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 PathLike = Union[str, "os.PathLike[str]"]
 
 __version__ = "0.2.0"
-__all__ = ["clean_csv", "process_dataset", "iter_clean_csv", "clean_csv_to_parquet"]
+__all__ = ["clean_csv", "clean_file", "clean_table", "process_dataset", "iter_clean_csv", "clean_csv_to_parquet"]
 
 logger = logging.getLogger("kaos_cleaner")
 logger.addHandler(logging.NullHandler())  # applications decide where logs go
@@ -66,6 +66,11 @@ def _options_json(
     infer_types=None,
     datetime_formats=None,
     impute=None,
+    delimiter=None,
+    decimal=None,
+    thousands=None,
+    comment=None,
+    header=None,
 ):
     """The options as the engine's JSON; explicit keywords, so typos raise TypeError."""
     options = dict(
@@ -78,6 +83,11 @@ def _options_json(
         infer_types=infer_types,
         datetime_formats=datetime_formats,
         impute=impute,
+        delimiter=delimiter,
+        decimal=decimal,
+        thousands=thousands,
+        comment=comment,
+        header=header,
     )
     return json.dumps({k: list(v) if isinstance(v, (tuple, set)) else v for k, v in options.items() if v is not None})
 
@@ -103,8 +113,16 @@ def process_dataset(
     infer_types: bool | None = None,
     datetime_formats: Sequence[str] | None = None,
     impute: str | Mapping[str, str] | None = None,
+    delimiter: str | None = None,
+    decimal: str | None = None,
+    thousands: str | None = None,
+    comment: str | None = None,
+    header: int | None = None,
 ) -> pyarrow.Table:
     """Load and clean a CSV file, returning a pyarrow Table.
+
+    Reads any delimited text file (CSV, TSV, semicolon- or pipe-separated),
+    also gzip-compressed (``data.csv.gz``).
 
     Every option defaults to the engine's behaviour shown in brackets.
 
@@ -128,6 +146,15 @@ def process_dataset(
             a ``{column: strategy}`` dict. Strategies: "mean", "median",
             "zero" (numeric columns), "mode", "ffill", "bfill" (any column).
             Column names here are the cleaned (snake_case) ones.
+        delimiter: Field separator, one character such as ``"\\t"``, ``";"``
+            or ``"|"`` [detected from the file].
+        decimal: Decimal mark in numbers, e.g. ``","`` for ``3,14`` ["."].
+        thousands: Thousands separator inside numbers, e.g. ``"."`` together
+            with ``decimal=","`` for ``1.234,50`` [none].
+        comment: Skip lines starting with this text, e.g. ``"#"`` [none].
+        header: Line number of the header row; lines above it are skipped.
+            0 means the file has no header and columns are named
+            ``column1``, ``column2``, ... [1].
 
     Returns:
         pyarrow.Table: The cleaned data.
@@ -149,6 +176,11 @@ def process_dataset(
         infer_types=infer_types,
         datetime_formats=datetime_formats,
         impute=impute,
+        delimiter=delimiter,
+        decimal=decimal,
+        thousands=thousands,
+        comment=comment,
+        header=header,
     )
     c_schema = ffi.new("struct ArrowSchema*")
     c_array = ffi.new("struct ArrowArray*")
@@ -280,3 +312,226 @@ def clean_csv_to_parquet(
             writer.write_batch(batch)
             rows += batch.num_rows
     return rows
+
+
+PARSER_OPTIONS = frozenset({"delimiter", "decimal", "thousands", "comment", "header"})
+
+
+def _engine_type(arr: pyarrow.Array) -> pyarrow.Array:
+    """Cast a column into a type the engine imports, keeping its values."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    t = arr.type
+    if pa.types.is_dictionary(t):
+        return _engine_type(arr.dictionary_decode())
+    if pa.types.is_string_view(t):
+        return pc.cast(arr, pa.large_string())
+    if pa.types.is_timestamp(t) and t.tz is not None:
+        return pc.cast(arr, pa.timestamp(t.unit))  # the same instants, as naive UTC
+    if pa.types.is_decimal(t) or pa.types.is_float16(t):
+        return pc.cast(arr, pa.float64())
+    if pa.types.is_time(t) or pa.types.is_duration(t):
+        return pc.cast(arr, pa.string())
+    return arr
+
+
+def _as_batch(data: Any) -> tuple[pyarrow.RecordBatch, str]:
+    """The table as one record batch of engine types, and what kind it was."""
+    import pyarrow as pa
+
+    module = type(data).__module__.split(".")[0]
+    if isinstance(data, pa.RecordBatch):
+        kind, table = "batch", pa.Table.from_batches([data])
+    elif isinstance(data, pa.Table):
+        kind, table = "table", data
+    elif module == "polars":
+        kind, table = "polars", data.to_arrow()
+    elif module == "pandas":
+        kind, table = "pandas", pa.Table.from_pandas(data, preserve_index=False)
+    else:
+        raise TypeError(
+            f"clean_table takes a pyarrow Table or RecordBatch, a polars DataFrame or a pandas DataFrame, "
+            f"not {type(data).__name__}"
+        )
+    table = table.combine_chunks()
+    columns = [_engine_type(col.chunk(0) if col.num_chunks else pa.array([], type=col.type)) for col in table.columns]
+    return pa.RecordBatch.from_arrays(columns, names=table.column_names), kind
+
+
+def clean_table(data: Any, **options: Any) -> Any:
+    """Clean a table that is already in memory.
+
+    Accepts a pyarrow Table or RecordBatch, a polars DataFrame or a pandas
+    DataFrame, and returns the cleaned data as the same kind of object. The
+    cleaning is the same as for files: renaming, type inference on text
+    columns, missing values, deduplication and imputation.
+
+    Types the engine does not read natively are converted first:
+    dictionary/categorical columns to their values, time-zone-aware
+    timestamps to UTC, decimals to float64, times and durations to text.
+    Nested types (lists, structs) and binary columns are not supported.
+
+    Args:
+        data: The table to clean.
+        **options: The keyword options of `process_dataset`, except the
+            parsing options (`delimiter`, `decimal`, `thousands`, `comment`,
+            `header`), which only apply to files.
+
+    Returns:
+        The cleaned table, of the same type as `data`.
+
+    Raises:
+        TypeError: `data` is not a supported table type, or a parsing option
+            was given.
+        RuntimeError: An option is invalid or a column type is unsupported;
+            the message is the engine's.
+
+    Example:
+        >>> clean_table(pl.read_parquet("orders.parquet"), impute="median")
+    """
+    import pyarrow as pa
+    from pyarrow.cffi import ffi
+
+    parsing = PARSER_OPTIONS.intersection(options)
+    if parsing:
+        raise TypeError(f"clean_table does not take the file parsing options {sorted(parsing)}")
+    options_json = _options_json(**options)
+    batch, kind = _as_batch(data)
+
+    in_schema, in_array = ffi.new("struct ArrowSchema*"), ffi.new("struct ArrowArray*")
+    out_schema, out_array = ffi.new("struct ArrowSchema*"), ffi.new("struct ArrowArray*")
+    ptr = lambda c: int(ffi.cast("uintptr_t", c))  # noqa: E731
+    batch._export_to_c(ptr(in_array), ptr(in_schema))
+    try:
+        with _runtime.lock:
+            lib = _runtime.load()
+            status = lib.kaos_clean_arrow(
+                ptr(in_schema), ptr(in_array), options_json.encode(), ptr(out_schema), ptr(out_array)
+            )
+            _emit_logs(lib)
+            if status != 0:
+                raise RuntimeError(lib.kaos_last_error().decode("utf-8", errors="replace"))
+    finally:
+        _release(in_array, in_schema)  # the engine releases them; this covers a failed call
+
+    try:
+        result = pa.RecordBatch._import_from_c(ptr(out_array), ptr(out_schema))
+    except BaseException:
+        _release(out_array, out_schema)
+        raise
+
+    if kind == "batch":
+        return result
+    table = pa.Table.from_batches([result])
+    if kind == "polars":
+        import polars as pl
+
+        return pl.from_arrow(table)
+    if kind == "pandas":
+        return table.to_pandas()
+    return table
+
+
+TEXT_EXTENSIONS = {".csv": None, ".txt": None, ".dat": None, ".tsv": "\t", ".tab": "\t", ".psv": "|"}
+EXCEL_EXTENSIONS = (".xlsx", ".xlsm", ".xls", ".ods")
+
+
+def clean_file(path: PathLike, **options: Any) -> polars.DataFrame:
+    """Load and clean a file of any supported format, returning a polars DataFrame.
+
+    The format follows the file extension:
+
+    - Delimited text, read by the engine: ``.csv``, ``.tsv``/``.tab`` (tab),
+      ``.psv`` (pipe), ``.txt``, ``.dat``, each also gzip-compressed
+      (``.csv.gz``). The delimiter is detected unless given.
+    - Parquet (``.parquet``, ``.pq``) and Arrow IPC/Feather (``.arrow``,
+      ``.feather``, ``.ipc``), read with pyarrow.
+    - JSON Lines (``.jsonl``, ``.ndjson``) with pyarrow and JSON arrays of
+      records (``.json``) with polars.
+    - Excel and OpenDocument spreadsheets (``.xlsx``, ``.xlsm``, ``.xls``,
+      ``.ods``) with polars, which needs the optional ``fastexcel`` package;
+      the first sheet is read.
+
+    Files that are not text are loaded into memory and cleaned with
+    `clean_table`, so the parsing options do not apply to them.
+
+    Args:
+        path: The file to clean.
+        **options: The keyword options of `process_dataset`.
+
+    Returns:
+        polars.DataFrame: The cleaned data.
+
+    Raises:
+        FileNotFoundError: The file does not exist.
+        ValueError: The extension is not one listed above.
+        ImportError: A spreadsheet was given and ``fastexcel`` is missing.
+        RuntimeError: The engine could not clean the data; the message is
+            the engine's.
+    """
+    import polars as pl
+
+    path = os.fspath(path)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"file not found: {path}")
+    name = path.lower()
+    name = name[:-3] if name.endswith(".gz") else name
+    ext = os.path.splitext(name)[1]
+
+    if ext in TEXT_EXTENSIONS:
+        if TEXT_EXTENSIONS[ext] is not None and options.get("delimiter") is None:
+            options["delimiter"] = TEXT_EXTENSIONS[ext]
+        return clean_csv(path, **options)
+    if path.lower().endswith(".gz"):
+        raise ValueError(f"gzip compression is supported for delimited text only, not {ext} files")
+
+    parsing = PARSER_OPTIONS.intersection(k for k, v in options.items() if v is not None)
+    if parsing:
+        raise TypeError(f"the parsing options {sorted(parsing)} apply to delimited text files only")
+    options = {k: v for k, v in options.items() if k not in PARSER_OPTIONS}
+
+    data: Any
+    if ext in (".parquet", ".pq"):
+        import pyarrow.parquet as pq
+
+        data = pq.read_table(path)
+    elif ext in (".arrow", ".feather", ".ipc"):
+        import pyarrow.feather as feather
+
+        data = feather.read_table(path)
+    elif ext in (".jsonl", ".ndjson"):
+        import pyarrow.json as pj
+
+        data = pj.read_json(path)
+    elif ext == ".json":
+        data = pl.read_json(path)
+    elif ext in EXCEL_EXTENSIONS:
+        try:
+            data = pl.read_excel(path)
+        except ModuleNotFoundError as e:
+            raise ImportError(
+                'reading spreadsheets needs the fastexcel package: pip install "kaos-cleaner[excel]"'
+            ) from e
+    else:
+        supported = sorted(
+            [
+                *TEXT_EXTENSIONS,
+                ".parquet",
+                ".pq",
+                ".arrow",
+                ".feather",
+                ".ipc",
+                ".jsonl",
+                ".ndjson",
+                ".json",
+                *EXCEL_EXTENSIONS,
+            ]
+        )
+        raise ValueError(f"unsupported file type {ext or '(no extension)'!r}; supported: {', '.join(supported)}")
+
+    df = clean_table(data, **options)
+    if not isinstance(df, pl.DataFrame):
+        df = pl.from_arrow(df)
+    assert isinstance(df, pl.DataFrame)
+    return df
