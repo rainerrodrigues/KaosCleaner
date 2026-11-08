@@ -14,12 +14,14 @@ CSV parsing uses one Julia thread per CPU core; set $KAOSCLEANER_THREADS
 The engine's messages (rows dropped, columns converted, values imputed, CSV
 parse warnings) go to the standard `logging` logger "kaos_cleaner".
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
-from typing import TYPE_CHECKING, Any, Mapping, Sequence, Union
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Union
 
 from . import _runtime
 
@@ -39,20 +41,45 @@ logger.addHandler(logging.NullHandler())  # applications decide where logs go
 def _emit_logs(lib):
     """Forward the engine's buffered log records to the "kaos_cleaner" logger."""
     for level, message in json.loads(lib.kaos_take_logs().decode("utf-8", errors="replace")):
-        # Julia levels: Debug -1000, Info 0, Warn 1000, Error 2000
-        py_level = (logging.DEBUG if level < 0 else logging.INFO if level < 1000
-                    else logging.WARNING if level < 2000 else logging.ERROR)
-        logger.log(py_level, message)
+        logger.log(_python_level(level), message)
 
 
-def _options_json(*, drop=None, keep=None, missing_values=None, rename=None, dedupe=None,
-                  drop_empty_rows=None, infer_types=None, datetime_formats=None, impute=None):
+def _python_level(julia_level: int) -> int:
+    """Julia's log levels (Debug -1000, Info 0, Warn 1000, Error 2000) as Python's."""
+    if julia_level < 0:
+        return logging.DEBUG
+    if julia_level < 1000:
+        return logging.INFO
+    if julia_level < 2000:
+        return logging.WARNING
+    return logging.ERROR
+
+
+def _options_json(
+    *,
+    drop=None,
+    keep=None,
+    missing_values=None,
+    rename=None,
+    dedupe=None,
+    drop_empty_rows=None,
+    infer_types=None,
+    datetime_formats=None,
+    impute=None,
+):
     """The options as the engine's JSON; explicit keywords, so typos raise TypeError."""
-    options = dict(drop=drop, keep=keep, missing_values=missing_values, rename=rename, dedupe=dedupe,
-                   drop_empty_rows=drop_empty_rows, infer_types=infer_types,
-                   datetime_formats=datetime_formats, impute=impute)
-    return json.dumps({k: list(v) if isinstance(v, (tuple, set)) else v
-                       for k, v in options.items() if v is not None})
+    options = dict(
+        drop=drop,
+        keep=keep,
+        missing_values=missing_values,
+        rename=rename,
+        dedupe=dedupe,
+        drop_empty_rows=drop_empty_rows,
+        infer_types=infer_types,
+        datetime_formats=datetime_formats,
+        impute=impute,
+    )
+    return json.dumps({k: list(v) if isinstance(v, (tuple, set)) else v for k, v in options.items() if v is not None})
 
 
 def _release(*structs):
@@ -64,12 +91,19 @@ def _release(*structs):
             c.release(c)
 
 
-def process_dataset(path: PathLike, *, drop: Sequence[str] | None = None,
-                    keep: Sequence[str] | None = None, missing_values: Sequence[str] | None = None,
-                    rename: bool | None = None, dedupe: bool | None = None,
-                    drop_empty_rows: bool | None = None, infer_types: bool | None = None,
-                    datetime_formats: Sequence[str] | None = None,
-                    impute: str | Mapping[str, str] | None = None) -> pyarrow.Table:
+def process_dataset(
+    path: PathLike,
+    *,
+    drop: Sequence[str] | None = None,
+    keep: Sequence[str] | None = None,
+    missing_values: Sequence[str] | None = None,
+    rename: bool | None = None,
+    dedupe: bool | None = None,
+    drop_empty_rows: bool | None = None,
+    infer_types: bool | None = None,
+    datetime_formats: Sequence[str] | None = None,
+    impute: str | Mapping[str, str] | None = None,
+) -> pyarrow.Table:
     """Load and clean a CSV file, returning a pyarrow Table.
 
     Every option defaults to the engine's behaviour shown in brackets.
@@ -105,9 +139,17 @@ def process_dataset(path: PathLike, *, drop: Sequence[str] | None = None,
     import pyarrow as pa
     from pyarrow.cffi import ffi
 
-    options = _options_json(drop=drop, keep=keep, missing_values=missing_values, rename=rename,
-                            dedupe=dedupe, drop_empty_rows=drop_empty_rows, infer_types=infer_types,
-                            datetime_formats=datetime_formats, impute=impute)
+    options = _options_json(
+        drop=drop,
+        keep=keep,
+        missing_values=missing_values,
+        rename=rename,
+        dedupe=dedupe,
+        drop_empty_rows=drop_empty_rows,
+        infer_types=infer_types,
+        datetime_formats=datetime_formats,
+        impute=impute,
+    )
     c_schema = ffi.new("struct ArrowSchema*")
     c_array = ffi.new("struct ArrowArray*")
     ptr_schema = int(ffi.cast("uintptr_t", c_schema))
@@ -138,14 +180,17 @@ def clean_csv(path: PathLike, **options: Any) -> polars.DataFrame:
     """
     import polars as pl
 
-    return pl.from_arrow(process_dataset(path, **options))
+    df = pl.from_arrow(process_dataset(path, **options))
+    assert isinstance(df, pl.DataFrame)  # a Table always converts to a DataFrame
+    return df
 
 
 DEFAULT_CHUNK_SIZE = 256 * 2**20
 
 
-def iter_clean_csv(path: PathLike, *, chunk_size: int = DEFAULT_CHUNK_SIZE,
-                   **options: Any) -> pyarrow.RecordBatchReader:
+def iter_clean_csv(
+    path: PathLike, *, chunk_size: int = DEFAULT_CHUNK_SIZE, **options: Any
+) -> pyarrow.RecordBatchReader:
     """Clean a CSV file of any size in chunks, as a stream of record batches.
 
     Memory use follows `chunk_size` rather than the file size, so files larger
@@ -209,8 +254,9 @@ def iter_clean_csv(path: PathLike, *, chunk_size: int = DEFAULT_CHUNK_SIZE,
     return pa.RecordBatchReader.from_batches(source.schema, batches())
 
 
-def clean_csv_to_parquet(path: PathLike, out_path: PathLike, *, chunk_size: int = DEFAULT_CHUNK_SIZE,
-                         **options: Any) -> int:
+def clean_csv_to_parquet(
+    path: PathLike, out_path: PathLike, *, chunk_size: int = DEFAULT_CHUNK_SIZE, **options: Any
+) -> int:
     """Clean a CSV file of any size into a Parquet file, chunk by chunk.
 
     Memory use follows `chunk_size` rather than the file size. Behaves like

@@ -1,0 +1,14 @@
+# Python lint and format settings for python/ and scripts/ (pre-commit and CI)
+line-length = 120
+target-version = "py39"
+extend-exclude = ["*.md"]  # leave hand-aligned examples in docs alone
+
+[lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # import order
+    "B",       # bugbear
+    "UP",      # pyupgrade
+    "SIM",     # simplify
+]

@@ -1,4 +1,5 @@
 """Tests for finding, unpacking and loading the engine (kaos_cleaner._runtime)."""
+
 import os
 
 import kaos_cleaner
@@ -27,9 +28,9 @@ def test_unimported_results_are_released(valid_csv):
     c_array = ffi.new("struct ArrowArray*")
     with _runtime.lock:
         lib = _runtime.load()
-        status = lib.process_dataset_with_options(os.fsencode(valid_csv), b"",
-                                                  int(ffi.cast("uintptr_t", c_schema)),
-                                                  int(ffi.cast("uintptr_t", c_array)))
+        status = lib.process_dataset_with_options(
+            os.fsencode(valid_csv), b"", int(ffi.cast("uintptr_t", c_schema)), int(ffi.cast("uintptr_t", c_array))
+        )
         kaos_cleaner._emit_logs(lib)
     assert status == 0 and c_array.release != ffi.NULL
 
