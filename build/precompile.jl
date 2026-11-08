@@ -77,6 +77,22 @@ for opts in ("""{"delimiter": ";", "decimal": ",", "thousands": ".", "comment": 
     Libc.free(array)
 end
 
+# Sensor data: sub-millisecond timestamps, epoch columns, interpolation, and
+# the nanosecond result fed back through kaos_clean_arrow
+imu = joinpath(dirname(path), "trace_imu.csv")
+write(imu, "t,stamp,wall,accel\n2024-01-01T10:00:00.000100,1700000000000000001,1700000000.25,1.0\n" *
+           "2024-01-01 10:00:00.000200,1700000000000000002,1700000000.5,\n2024-01-01T10:00:00.0003,1700000000000000003,1700000001,3.0\n")
+let opts = """{"epoch": {"stamp": "ns", "wall": "s"}, "impute": {"accel": "interpolate"}}"""
+    schema, array, out_schema, out_array = (Libc.calloc(1, max(sizeof(ArrowSchema), sizeof(ArrowArray))) for _ in 1:4)
+    rc = GC.@preserve imu opts KaosCleaner.process_dataset_with_options(
+        Base.unsafe_convert(Cstring, imu), Base.unsafe_convert(Cstring, opts), schema, array)
+    rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    rc = KaosCleaner.kaos_clean_arrow(schema, array, Base.unsafe_convert(Cstring, ""), out_schema, out_array)
+    rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    KaosCleaner.release!(out_schema, out_array)
+    foreach(Libc.free, (schema, array, out_schema, out_array))
+end
+
 # In-memory cleaning: export a result and feed it back through
 # kaos_clean_arrow, so Arrow import is compiled in for every exported type
 for opts in ("", """{"impute": "zero"}""")

@@ -328,6 +328,47 @@ end
         @test_throws ArgumentError KaosCleaner.parse_options("""{"raw": 1}""")
     end
 
+    @testset "sensor data: timestamps, epochs, interpolation" begin
+        T = KaosCleaner.Timestamp
+        @test KaosCleaner.parse_timestamp("2024-01-31T10:30:00.123456789") ==
+              T(Dates.value(DateTime(2024, 1, 31, 10, 30) - DateTime(1970)) * 1_000_000 + 123_456_789)
+        @test KaosCleaner.parse_timestamp("2024-01-31 10:30:00,5Z").ns % 1_000_000_000 == 500_000_000
+        @test KaosCleaner.parse_timestamp("2024-02-30T10:30:00.1") === nothing   # no such day
+        @test KaosCleaner.parse_timestamp("2024-01-31T10:30:00.1234567890") === nothing
+        @test string(T(1_500_000_001)) == "1970-01-01T00:00:01.500000001"
+        @test T(DateTime(1970, 1, 1, 0, 0, 1)) == T(1_000_000_000)
+
+        dir = mktempdir()
+        path = joinpath(dir, "imu.csv")
+        write(path, "t,stamp_ns,stamp_s,accel\n" *
+                    "2024-01-01T10:00:00.000100,1700000000000000001,1700000000.25,1.0\n" *
+                    "2024-01-01T10:00:00.000200,1700000000000000002,1700000000.5,\n" *
+                    "2024-01-01 10:00:00.0003,1700000000000000003,1700000000.75,\n" *
+                    "2024-01-01T10:00:00.000400,1700000000000000004,1700000001,4.0\n")
+        o = CleanOptions(epoch=Dict("stamp_ns" => "ns", "stamp_s" => "s"), impute=Dict("accel" => "interpolate"))
+        df = clean_dataset!(load_dataset(path, o), o)
+        @test nonmissingtype(eltype(df.t)) == T && df.t[2].ns - df.t[1].ns == 100_000   # microseconds kept
+        @test df.stamp_ns[1] == T(1700000000000000001) && df.stamp_ns[4].ns - df.stamp_ns[1].ns == 3
+        @test df.stamp_s[1] == T(1_700_000_000_250_000_000)
+        @test df.accel == [1.0, 2.0, 3.0, 4.0]
+        # exported as Arrow timestamp[ns] and read back exactly
+        sch = Ptr{ArrowSchema}(Libc.calloc(1, sizeof(ArrowSchema))); arr = Ptr{ArrowArray}(Libc.calloc(1, sizeof(ArrowArray)))
+        export_dataframe(df, sch, arr)
+        @test unsafe_string(unsafe_load(unsafe_load(unsafe_load(sch).children, 1)).format) == "tsn:"
+        @test isequal(KaosCleaner.import_dataframe(sch, arr), df)
+        foreach(Libc.free, (sch, arr))
+        # plain timestamps without fractions stay DateTime; interpolation leaves the ends alone
+        @test KaosCleaner.infer_timestamp(["2024-01-01 10:00:00"]) === nothing
+        @test isequal(KaosCleaner.interpolate_linear([missing, 1, missing, 3, missing]), [missing, 1.0, 2.0, 3.0, missing])
+        @test_throws ArgumentError clean_dataset(DataFrame(a=["x"]), CleanOptions(epoch=Dict("a" => "s")))
+        @test_throws ArgumentError clean_dataset(DataFrame(a=[1]), CleanOptions(epoch=Dict("b" => "s")))
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"epoch": {"a": "minutes"}}""")
+        @test_throws ArgumentError clean_dataset(DataFrame(a=["x", missing], b=[1, 2]), CleanOptions(impute=Dict("a" => "interpolate")))
+        @test KaosCleaner.epoch_timestamp(UInt64(10)^19, 1) === nothing
+        @test KaosCleaner.epoch_timestamp("1.5", 1000) == T(1500) && KaosCleaner.epoch_timestamp(-1.5, 1) == T(-2)
+        @test KaosCleaner.epoch_timestamp(1.7e9 + 0.000001, 1_000_000_000).ns % 1_000_000_000 in 750:1250  # Float64 resolves ~240 ns here
+    end
+
     @testset "streaming coercion" begin
         @test KaosCleaner.coerce_value(Int64, 3.0) === 3
         @test KaosCleaner.coerce_value(Int64, 3.5) === nothing

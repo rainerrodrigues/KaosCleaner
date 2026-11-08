@@ -147,6 +147,7 @@ function clean_dataset!(df::DataFrame, opts::CleanOptions=CleanOptions())
 
     clean_strings!(df, Markers(opts.missing_values))
     opts.infer_types && infer_types!(df, opts)
+    apply_epochs!(df, opts)
 
     if opts.drop_empty_rows
         n = drop_empty_rows!(df, rows)

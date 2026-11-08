@@ -1,12 +1,13 @@
 module KaosCleaner
 
-using CSV, DataFrames, JSON3, Logging
+using CSV, DataFrames, Dates, JSON3, Logging
 
-export load_dataset, clean_dataset, clean_dataset!, export_dataframe, CleanOptions
+export load_dataset, clean_dataset, clean_dataset!, export_dataframe, CleanOptions, Timestamp
 
 "Below this many rows, splitting work across tasks costs more than it saves."
 const PARALLEL_MIN_ROWS = 50_000
 
+include("timestamps.jl")
 include("options.jl")
 include("cleaning.jl")
 include("inference.jl")

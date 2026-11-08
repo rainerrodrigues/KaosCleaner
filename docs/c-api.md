@@ -89,7 +89,8 @@ another thread's message.
 `process_dataset_with_options` fills a struct array (format `+s`) with one
 child per column. Column formats are standard Arrow: `l` int64, `g` float64,
 `b` boolean, `u` UTF-8 string, `tdD` date, `tsm:` timestamp in milliseconds,
-`n` all-null.
+`n` all-null, and `tsn:` nanosecond timestamp for values with sub-millisecond
+precision or columns named in the `epoch` option.
 
 The caller owns both structs once the call succeeds and must call their
 `release` callbacks when done; that frees the engine's buffers. Importing

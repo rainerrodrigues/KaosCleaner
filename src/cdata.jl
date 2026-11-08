@@ -155,6 +155,7 @@ encode!(allocs, ::Type{Date}, col) =
     encode_fixed!(allocs, "tdD", Int32, d -> Dates.value(d - Date(1970)), col)
 encode!(allocs, ::Type{DateTime}, col) =
     encode_fixed!(allocs, "tsm:", Int64, d -> Dates.value(d - DateTime(1970)), col)
+encode!(allocs, ::Type{Timestamp}, col) = encode_fixed!(allocs, "tsn:", Int64, t -> t.ns, col)
 
 function encode_fixed!(allocs, fmt, ::Type{S}, conv, col) where {S}
     valid, nulls = validity!(allocs, col)

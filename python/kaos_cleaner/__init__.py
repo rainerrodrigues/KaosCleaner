@@ -79,6 +79,7 @@ def _options_json(
     thousands=None,
     comment=None,
     header=None,
+    epoch=None,
     source_row=None,
     raw=None,
 ):
@@ -98,6 +99,7 @@ def _options_json(
         thousands=thousands,
         comment=comment,
         header=header,
+        epoch=epoch,
         source_row=source_row,
         raw=raw,
     )
@@ -130,6 +132,7 @@ def process_dataset(
     thousands: str | None = None,
     comment: str | None = None,
     header: int | None = None,
+    epoch: Mapping[str, str] | None = None,
     source_row: bool | None = None,
 ) -> pyarrow.Table:
     """Load and clean a CSV file, returning a pyarrow Table.
@@ -157,7 +160,8 @@ def process_dataset(
             e.g. ``["dd/mm/yyyy", "dd/mm/yyyy HH:MM"]``.
         impute: Fill missing values. One strategy for all suitable columns, or
             a ``{column: strategy}`` dict. Strategies: "mean", "median",
-            "zero" (numeric columns), "mode", "ffill", "bfill" (any column).
+            "zero", "interpolate" (numeric columns; "interpolate" fills gaps
+            linearly by row position), "mode", "ffill", "bfill" (any column).
             Column names here are the cleaned (snake_case) ones.
         delimiter: Field separator, one character such as ``"\\t"``, ``";"``
             or ``"|"`` [detected from the file].
@@ -168,6 +172,9 @@ def process_dataset(
         header: Line number of the header row; lines above it are skipped.
             0 means the file has no header and columns are named
             ``column1``, ``column2``, ... [1].
+        epoch: Numeric columns holding times since 1970, converted to
+            nanosecond timestamps: ``{column: unit}`` with unit "s", "ms",
+            "us" or "ns", e.g. ``{"stamp": "ns"}``. Cleaned column names.
         source_row: Add a first column ``source_row`` holding each row's
             position among the file's data rows (1 = the first row after the
             header), so cleaned rows can be traced back with `restore`
@@ -195,6 +202,7 @@ def process_dataset(
         thousands=thousands,
         comment=comment,
         header=header,
+        epoch=epoch,
         source_row=source_row,
     )
     return _run_file(path, options)
