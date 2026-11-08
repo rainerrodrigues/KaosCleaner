@@ -96,6 +96,14 @@ end
 
 is_numeric(T) = T <: Real && !(T <: Bool)
 
+"Reject options that need the whole data at once, for streams and live sessions."
+function check_incremental(opts::CleanOptions, where_::String)
+    opts.outliers === nothing ||
+        throw(ArgumentError("outliers need the whole data; they are not available $where_"))
+    opts.resample === nothing ||
+        throw(ArgumentError("resample needs the whole data; it is not available $where_"))
+end
+
 """
     open_stream(path, opts, chunk_bytes) -> CleanStream
 
@@ -106,6 +114,7 @@ function open_stream(path::AbstractString, opts::CleanOptions, chunk_bytes::Inte
     isfile(path) || throw(ArgumentError("file not found: $path"))
     chunk_bytes > 0 || throw(ArgumentError("chunk size must be positive"))
     opts.raw && throw(ArgumentError("the raw option reads a whole file; it is not available when streaming"))
+    check_incremental(opts, "when streaming")
     plan = stream_plan(path, opts)
     opts.source_row && any(p -> p.name == "source_row", plan) &&
         throw(ArgumentError("the data already has a column named `source_row`; rename or drop it to use source_row"))

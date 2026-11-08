@@ -164,7 +164,9 @@ function clean_dataset!(df::DataFrame, opts::CleanOptions=CleanOptions())
         end
     end
 
+    remove_outliers!(df, opts)
     impute!(df, opts)
+    resample!(df, opts)
     disallowmissing!(df; error=false)
     return add_source_row!(df, rows)
 end

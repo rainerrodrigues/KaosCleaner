@@ -110,6 +110,21 @@ int kaos_clean_arrow(struct ArrowSchema* in_schema, struct ArrowArray* in_array,
                      struct ArrowSchema* out_schema, struct ArrowArray* out_array);
 
 /*
+ * Live cleaning sessions: record batches cleaned one at a time, with column
+ * types (from the first batch), duplicate fingerprints, ffill values and row
+ * numbers kept between calls. kaos_session_open returns a session id, or 0 on
+ * failure (see kaos_last_error()); options as for kaos_clean_arrow, with
+ * impute limited to "zero" and "ffill" and no outliers or resample.
+ * kaos_session_clean takes a batch like kaos_clean_arrow (the input is always
+ * released) and returns 0 on success, 1 on failure; every output field is
+ * nullable, so all batches share one schema. Close each session when done.
+ */
+int64_t kaos_session_open(const char* options_json);
+int kaos_session_clean(int64_t session, struct ArrowSchema* in_schema, struct ArrowArray* in_array,
+                       struct ArrowSchema* out_schema, struct ArrowArray* out_array);
+void kaos_session_close(int64_t session);
+
+/*
  * Message describing the last failure ("" after a success). Valid until the
  * next call. The message and the log buffer below are shared by the whole
  * process: if several threads call the library and read them, serialize the

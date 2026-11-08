@@ -272,6 +272,7 @@ function impute!(df::DataFrame, opts::CleanOptions)
     opts.impute === nothing && return df
     explicit = opts.impute isa Dict
     plan = explicit ? opts.impute : Dict(n => opts.impute for n in names(df))
+    times = nothing  # the time column in ns, computed once if interpolation needs it
     if explicit
         missing_cols = setdiff(keys(plan), names(df))
         isempty(missing_cols) || throw(ArgumentError("impute: no column named $(join(sort(collect(missing_cols)), ", "))"))
@@ -285,7 +286,12 @@ function impute!(df::DataFrame, opts::CleanOptions)
             continue
         end
         n = count(ismissing, col)
-        df[!, name] = impute(col, strategy)
+        if strategy == "interpolate" && opts.time_column !== nothing
+            times === nothing && (times = time_ns_column(df, opts))
+            df[!, name] = interpolate_by_time(col, times)
+        else
+            df[!, name] = impute(col, strategy)
+        end
         filled = n - count(ismissing, df[!, name])
         filled > 0 && @info "Imputed $filled missing value$(filled == 1 ? "" : "s") in `$name` ($strategy)"
     end

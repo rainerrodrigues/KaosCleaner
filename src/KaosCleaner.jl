@@ -11,10 +11,12 @@ include("timestamps.jl")
 include("options.jl")
 include("cleaning.jl")
 include("inference.jl")
+include("sensor.jl")
 include("logging.jl")
 include("cdata.jl")
 include("cimport.jl")
 include("streaming.jl")
+include("session.jl")
 
 # Message for the most recent failure, readable from C via kaos_last_error().
 const LAST_ERROR = Ref("")
@@ -74,7 +76,7 @@ function clean_arrow(in_schema::Ptr, in_array::Ptr, options_json::AbstractString
         try
             # Import first: it releases the input even if the options are invalid
             df = import_dataframe(Ptr{ArrowSchema}(in_schema), Ptr{ArrowArray}(in_array))
-            clean_dataset!(df, parse_options(options_json))
+            df = clean_dataset!(df, parse_options(options_json))
             (out_schema == C_NULL || out_array == C_NULL) &&
                 throw(ArgumentError("out_schema and out_array must not be NULL"))
             export_dataframe(df, Ptr{ArrowSchema}(out_schema), Ptr{ArrowArray}(out_array))
@@ -137,6 +139,27 @@ Base.@ccallable function kaos_open_stream(filepath::Cstring, options_json::Cstri
         set_error!(sprint(showerror, e))
         return 1
     end
+end
+
+# C entry point: int64_t kaos_session_open(const char* options_json). Returns
+# the id of a new live cleaning session, or 0 on failure (see kaos_last_error).
+Base.@ccallable function kaos_session_open(options_json::Cstring)::Int64
+    options = options_json == C_NULL ? "" : unsafe_string(options_json)
+    return with_logger(() -> session_open(options), LOGGER)
+end
+
+# C entry point: int kaos_session_clean(int64_t id, struct ArrowSchema* in_schema,
+#     struct ArrowArray* in_array, struct ArrowSchema* out_schema, struct ArrowArray* out_array)
+Base.@ccallable function kaos_session_clean(id::Int64, in_schema::Ptr{Cvoid}, in_array::Ptr{Cvoid},
+                                            out_schema::Ptr{Cvoid}, out_array::Ptr{Cvoid})::Cint
+    (in_schema == C_NULL || in_array == C_NULL) && (set_error!("in_schema and in_array must not be NULL"); return 1)
+    return session_clean(id, in_schema, in_array, out_schema, out_array)
+end
+
+# C entry point: void kaos_session_close(int64_t id)
+Base.@ccallable function kaos_session_close(id::Int64)::Cvoid
+    session_close(id)
+    return nothing
 end
 
 # C entry point: const char* kaos_last_error(void). The pointer stays valid
