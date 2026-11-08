@@ -60,6 +60,36 @@ for opts in (options, """{"impute": "ffill"}""", """{"impute": "mean"}""", """{"
 end
 unsafe_string(KaosCleaner.kaos_take_logs())
 
+# Parsing options: a semicolon file with decimal commas, a comment line and
+# a title line above the header
+eu = joinpath(dirname(path), "trace_eu.txt")
+write(eu, "Report 2024\n# exported\nName;Amount;Day\nA;1.234,50;2024-01-02\nB;7,25;2024-01-03\n")
+for opts in ("""{"delimiter": ";", "decimal": ",", "thousands": ".", "comment": "#", "header": 2}""",
+             """{"delimiter": "\\t", "header": 0}""")
+    schema = Libc.calloc(1, sizeof(ArrowSchema))
+    array = Libc.calloc(1, sizeof(ArrowArray))
+    rc = GC.@preserve eu opts KaosCleaner.process_dataset_with_options(
+        Base.unsafe_convert(Cstring, eu), Base.unsafe_convert(Cstring, opts), schema, array)
+    rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    KaosCleaner.release!(schema, array)
+    Libc.free(schema)
+    Libc.free(array)
+end
+
+# In-memory cleaning: export a result and feed it back through
+# kaos_clean_arrow, so Arrow import is compiled in for every exported type
+for opts in ("", """{"impute": "zero"}""")
+    schema, array, out_schema, out_array = (Libc.calloc(1, max(sizeof(ArrowSchema), sizeof(ArrowArray)))
+                                            for _ in 1:4)
+    rc = GC.@preserve path KaosCleaner.process_dataset(Base.unsafe_convert(Cstring, path), schema, array)
+    rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    rc = GC.@preserve opts KaosCleaner.kaos_clean_arrow(schema, array, Base.unsafe_convert(Cstring, opts),
+                                                        out_schema, out_array)
+    rc == 0 || error("precompile trace failed: ", unsafe_string(KaosCleaner.kaos_last_error()))
+    KaosCleaner.release!(out_schema, out_array)
+    foreach(Libc.free, (schema, array, out_schema, out_array))
+end
+
 # Streaming: open a stream over the big file in small chunks and drain it
 # through its C callbacks, as pyarrow does
 using KaosCleaner: ArrowArrayStream

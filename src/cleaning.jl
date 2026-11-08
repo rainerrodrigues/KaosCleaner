@@ -4,14 +4,29 @@
 const MISSING_STRINGS = ["", "NA", "N/A", "n/a", "na", "NaN", "nan", "null", "NULL", "None", "none"]
 
 """
+    load_dataset(path, opts=CleanOptions()) -> DataFrame
     load_dataset(path; missing_values=String[]) -> DataFrame
 
-Read a delimited file, mapping common missing-value markers (plus
-`missing_values`) to `missing`.
+Read a delimited file (gzip-compressed is fine), mapping common missing-value
+markers plus `opts.missing_values` to `missing` and applying the parsing
+options of `opts` (delimiter, decimal, thousands, comment, header).
 """
-function load_dataset(path::AbstractString; missing_values::Vector{String}=String[])
+function load_dataset(path::AbstractString, opts::CleanOptions)
     isfile(path) || throw(ArgumentError("file not found: $path"))
-    return CSV.read(path, DataFrame; missingstring=vcat(MISSING_STRINGS, missing_values), stripwhitespace=true)
+    return CSV.read(path, DataFrame; csv_options(opts)...)
+end
+
+load_dataset(path::AbstractString; missing_values::Vector{String}=String[]) =
+    load_dataset(path, CleanOptions(; missing_values))
+
+"CSV.jl keyword arguments for the parsing options in `opts`."
+function csv_options(opts::CleanOptions)
+    kw = (missingstring=vcat(MISSING_STRINGS, opts.missing_values), stripwhitespace=true,
+          decimal=only(opts.decimal), header=opts.header == 0 ? false : opts.header)
+    opts.delimiter === nothing || (kw = (; kw..., delim=only(opts.delimiter)))
+    opts.thousands === nothing || (kw = (; kw..., groupmark=only(opts.thousands)))
+    opts.comment === nothing || (kw = (; kw..., comment=opts.comment))
+    return kw
 end
 
 """
