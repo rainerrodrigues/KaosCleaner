@@ -1,0 +1,31 @@
+name: CompatHelper
+
+# Opens a pull request when a new major or minor version of a Julia
+# dependency is released outside the [compat] bounds in Project.toml.
+# Pull requests opened with GITHUB_TOKEN do not start CI; to have them
+# tested automatically, add an SSH deploy key with write access as the secret
+# COMPATHELPER_PRIV (see the CompatHelper.jl documentation). Its commits are
+# not Conventional Commits, so merging one never cuts a release.
+on:
+  schedule:
+    - cron: '41 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  compathelper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - name: Install CompatHelper
+        run: julia -e 'using Pkg; Pkg.add(name="CompatHelper", version="3")'
+      - name: Run CompatHelper
+        run: julia -e 'using CompatHelper; CompatHelper.main()'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMPATHELPER_PRIV: ${{ secrets.COMPATHELPER_PRIV }}

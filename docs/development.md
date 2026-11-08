@@ -125,9 +125,35 @@ message that counts.
 
 | Workflow | When | What |
 |---|---|---|
-| `ci.yml` | Every pull request | Julia tests, Linux engine build, Python tests, speed gate against pandas |
+| `ci.yml` | Every pull request; Mondays on `main` | Julia tests, Linux engine build, Python tests, speed gate against pandas. The weekly run first updates to the newest compatible Julia packages and installs the latest Python packages |
 | `docs.yml` | PRs and `main` touching docs or the Python package | Strict docs build; deploy to GitHub Pages from `main` |
 | `build_wheel.yml` | Every push to `main`, or manually | Release (see below); manual runs on a branch build and test all wheels without releasing |
+| `codeql.yml` | PRs, `main`, Mondays | CodeQL security analysis of the Python package and the workflows |
+| `dependabot-automerge.yml` | When CI or Docs finishes on a Dependabot PR | Merges minor and patch updates once every check passed; majors wait for review |
+| `compathelper.yml` | Mondays, or manually | Opens PRs when Julia dependencies release versions outside `[compat]` |
+
+## Automated maintenance
+
+Most upkeep runs without you:
+
+- **Dependabot** opens weekly PRs for GitHub Actions and the docs toolchain.
+  Minor and patch updates merge themselves once CI and Docs pass; major
+  updates stay open for review, since they can change behaviour.
+- **CompatHelper** does the same for the Julia dependencies' `[compat]`
+  bounds. Its PRs only get CI runs if the `COMPATHELPER_PRIV` deploy key
+  secret is set (see the CompatHelper.jl docs); otherwise push an empty
+  commit to the PR branch to start them.
+- **The weekly CI run** tests `main` against the newest packages, so an
+  upstream release that breaks the engine shows up as a failed run (GitHub
+  emails you) before users report it.
+- **CodeQL** scans every change and weekly for security issues.
+- **semantic-release** versions, tags and publishes; only the PyPI step
+  waits for your approval.
+
+None of these commits are `feat:` or `fix:`, so maintenance alone never
+cuts a release. TagBot is not used: semantic-release already tags each
+version and keeps `Project.toml` in step, which is what Julia's registry
+needs.
 
 To test the Windows and macOS wheels of a branch before merging:
 
