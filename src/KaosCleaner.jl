@@ -12,6 +12,7 @@ include("cleaning.jl")
 include("inference.jl")
 include("logging.jl")
 include("cdata.jl")
+include("cimport.jl")
 include("streaming.jl")
 
 # Message for the most recent failure, readable from C via kaos_last_error().
@@ -47,7 +48,7 @@ process_dataset(filepath::AbstractString, out_schema::Ptr, out_array::Ptr) =
 function _process_dataset(filepath::AbstractString, options_json::AbstractString, out_schema::Ptr, out_array::Ptr)::Cint
     try
         opts = parse_options(options_json)
-        df = clean_dataset!(load_dataset(filepath; missing_values=opts.missing_values), opts)
+        df = clean_dataset!(load_dataset(filepath, opts), opts)
         (out_schema == C_NULL || out_array == C_NULL) &&
             throw(ArgumentError("out_schema and out_array must not be NULL"))
         export_dataframe(df, Ptr{ArrowSchema}(out_schema), Ptr{ArrowArray}(out_array))
@@ -57,6 +58,43 @@ function _process_dataset(filepath::AbstractString, options_json::AbstractString
         set_error!(sprint(showerror, e))
         return 1
     end
+end
+
+"""
+    clean_arrow(in_schema, in_array, options_json, out_schema, out_array) -> Cint
+
+Clean a table passed in through the Arrow C Data Interface (a record batch,
+e.g. exported by pyarrow) and export the result into `out_schema`/`out_array`.
+The input structs are always released. Parsing options (delimiter, ...) do not
+apply. Returns 0 on success and 1 on failure (see `kaos_last_error`).
+"""
+function clean_arrow(in_schema::Ptr, in_array::Ptr, options_json::AbstractString, out_schema::Ptr, out_array::Ptr)::Cint
+    status = with_logger(LOGGER) do
+        try
+            # Import first: it releases the input even if the options are invalid
+            df = import_dataframe(Ptr{ArrowSchema}(in_schema), Ptr{ArrowArray}(in_array))
+            clean_dataset!(df, parse_options(options_json))
+            (out_schema == C_NULL || out_array == C_NULL) &&
+                throw(ArgumentError("out_schema and out_array must not be NULL"))
+            export_dataframe(df, Ptr{ArrowSchema}(out_schema), Ptr{ArrowArray}(out_array))
+            set_error!("")
+            Cint(0)
+        catch e
+            set_error!(sprint(showerror, e))
+            Cint(1)
+        end
+    end
+    GC.gc(false)
+    return status
+end
+
+# C entry point: int kaos_clean_arrow(struct ArrowSchema* in_schema, struct ArrowArray* in_array,
+#     const char* options_json, struct ArrowSchema* out_schema, struct ArrowArray* out_array)
+Base.@ccallable function kaos_clean_arrow(in_schema::Ptr{Cvoid}, in_array::Ptr{Cvoid}, options_json::Cstring,
+                                          out_schema::Ptr{Cvoid}, out_array::Ptr{Cvoid})::Cint
+    (in_schema == C_NULL || in_array == C_NULL) && (set_error!("in_schema and in_array must not be NULL"); return 1)
+    options = options_json == C_NULL ? "" : unsafe_string(options_json)
+    return clean_arrow(in_schema, in_array, options, out_schema, out_array)
 end
 
 # C entry point: int process_dataset(const char*, struct ArrowSchema*, struct ArrowArray*)

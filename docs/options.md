@@ -16,6 +16,26 @@ problem.
 | `datetime_formats` | none | Date formats to use, e.g. `["dd/mm/yyyy"]` |
 | `impute` | none | Fill missing values (strategy, or `{column: strategy}`) |
 
+### Parsing options
+
+These describe how a text file is written; they apply to files only (not to
+`clean_table`).
+
+| Option | Default | Effect |
+|---|---|---|
+| `delimiter` | detected | Field separator, one character: `","`, `"\t"`, `";"`, `"\|"` |
+| `decimal` | `"."` | Decimal mark in numbers, e.g. `","` for `3,14` |
+| `thousands` | none | Thousands separator inside numbers, e.g. `"."` for `1.234,50` |
+| `comment` | none | Skip lines starting with this text, e.g. `"#"` |
+| `header` | `1` | Line number of the header row; lines above it are skipped. `0`: no header, columns are named `column1`, `column2`, ... |
+
+`delimiter`, `decimal` and `thousands` must be different characters. A
+European-style file reads like this:
+
+```python
+clean_csv("umsatz.csv", delimiter=";", decimal=",", thousands=".")
+```
+
 ## The pipeline
 
 Steps run in this order:

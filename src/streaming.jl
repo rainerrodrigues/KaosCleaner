@@ -60,8 +60,7 @@ text_type(T) = (T === Union{} || T <: AbstractString) ? String : T
 
 "Decide output columns, types and conversions from the first rows of `path`."
 function stream_plan(path::AbstractString, opts::CleanOptions)
-    sample = DataFrame(CSV.File(path; limit=SAMPLE_ROWS, missingstring=vcat(MISSING_STRINGS, opts.missing_values),
-                                stripwhitespace=true); copycols=true)
+    sample = DataFrame(CSV.File(path; limit=SAMPLE_ROWS, csv_options(opts)...); copycols=true)
     sources = names(sample)
     parse_types = Dict(s => text_type(nonmissingtype(eltype(sample[!, s]))) for s in sources)
     opts.rename && rename!(sample, normalize_name.(sources); makeunique=true)
@@ -113,8 +112,7 @@ function open_stream(path::AbstractString, opts::CleanOptions, chunk_bytes::Inte
     # chunk that raises is parsed again with only its text columns typed, and
     # coerce_column then counts every misfit. Chunk boundaries do not depend
     # on the types, so both parses split the file identically.
-    base = (select=[p.source for p in plan], missingstring=vcat(MISSING_STRINGS, opts.missing_values),
-            stripwhitespace=true)
+    base = (; csv_options(opts)..., select=[p.source for p in plan])
     typed = Dict(p.source => Union{Missing, p.parse_type} for p in plan)
     text = Dict(p.source => Union{Missing, String} for p in plan if p.parse_type === String)
     chunks = file_chunks(path, nchunks, (; base..., types=typed, strict=true))

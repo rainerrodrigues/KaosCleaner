@@ -246,6 +246,55 @@ end
         @test KaosCleaner.byte_summary(IS.String7("a\xff")) == generic(IS.String7("a\xff"))
     end
 
+    @testset "Arrow import" begin
+        df = DataFrame(i=[1, missing, 3], f=[1.5, 2.5, missing], b=[true, missing, false], s=[" x ", "NA", "héllo"],
+                       d=[Date(2024, 1, 2), missing, Date(1969, 12, 31)],
+                       t=[DateTime(2024, 1, 2, 3, 4, 5, 6), missing, DateTime(1970)], n=[missing, missing, missing])
+        sch = Ptr{ArrowSchema}(Libc.calloc(1, sizeof(ArrowSchema)))
+        arr = Ptr{ArrowArray}(Libc.calloc(1, sizeof(ArrowArray)))
+        export_dataframe(df, sch, arr)
+        @test isequal(KaosCleaner.import_dataframe(sch, arr), df)          # export -> import round trip
+        @test unsafe_load(sch).release == C_NULL && unsafe_load(arr).release == C_NULL  # input released
+
+        export_dataframe(df, sch, arr)
+        osch = Ptr{ArrowSchema}(Libc.calloc(1, sizeof(ArrowSchema)))
+        oarr = Ptr{ArrowArray}(Libc.calloc(1, sizeof(ArrowArray)))
+        @test KaosCleaner.clean_arrow(sch, arr, """{"impute": "zero"}""", osch, oarr) == 0
+        cleaned = KaosCleaner.import_dataframe(osch, oarr)  # the importer reads every exported format
+        @test cleaned.i == [1, 0, 3] && isequal(cleaned.s, ["x", missing, "héllo"])
+        foreach(Libc.free, (osch, oarr))
+
+        export_dataframe(df, sch, arr)  # invalid options: an error, and the input is still released
+        @test KaosCleaner.clean_arrow(sch, arr, """{"dorp": 1}""", C_NULL, C_NULL) == 1
+        @test unsafe_load(arr).release == C_NULL
+
+        for empty in (DataFrame(i=Int64[], s=String[]), df[1:0, :])  # zero rows keep their column types
+            export_dataframe(empty, sch, arr)
+            back = KaosCleaner.import_dataframe(sch, arr)
+            @test nrow(back) == 0 && names(back) == names(empty)
+            @test all(nonmissingtype(eltype(back[!, c])) == nonmissingtype(eltype(empty[!, c])) for c in names(empty))
+        end
+        foreach(Libc.free, (sch, arr))
+    end
+
+    @testset "parsing options" begin
+        dir = mktempdir()
+        eu = joinpath(dir, "eu.csv")
+        write(eu, "id;price;city\n1;1.234,50;Köln\n# a comment\n2;12,75;Bonn\n")
+        o = KaosCleaner.parse_options("""{"delimiter": ";", "decimal": ",", "thousands": ".", "comment": "#"}""")
+        out = clean_dataset!(load_dataset(eu, o), o)
+        @test out.price == [1234.5, 12.75] && out.city == ["Köln", "Bonn"]
+        hdr = joinpath(dir, "hdr.tsv")
+        write(hdr, "title\nexported 2024\nid\tname\n1\tA\n2\tB\n")
+        h = CleanOptions(header=3)
+        @test names(clean_dataset!(load_dataset(hdr, h), h)) == ["id", "name"]
+        none = CleanOptions(header=0)
+        @test names(clean_dataset!(load_dataset(hdr, CleanOptions(header=0, comment="t")), none))[1] == "column1"
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"decimal": ",", "delimiter": ","}""")
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"delimiter": "ab"}""")
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"header": true}""")
+    end
+
     @testset "streaming coercion" begin
         @test KaosCleaner.coerce_value(Int64, 3.0) === 3
         @test KaosCleaner.coerce_value(Int64, 3.5) === nothing

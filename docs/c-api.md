@@ -65,6 +65,7 @@ garbage collector when another thread calls in.
 | `int process_dataset_with_options(const char* path, const char* options_json, struct ArrowSchema*, struct ArrowArray*)` | Clean a file into caller-allocated Arrow structs |
 | `int process_dataset(const char* path, struct ArrowSchema*, struct ArrowArray*)` | Same with default options |
 | `int kaos_open_stream(const char* path, const char* options_json, int64_t chunk_bytes, struct ArrowArrayStream*)` | Clean a file chunk by chunk as an Arrow stream |
+| `int kaos_clean_arrow(struct ArrowSchema* in_schema, struct ArrowArray* in_array, const char* options_json, struct ArrowSchema* out_schema, struct ArrowArray* out_array)` | Clean a record batch already in memory |
 | `const char* kaos_last_error(void)` | Message for the last failure |
 | `const char* kaos_take_logs(void)` | Log records since the last call, as JSON |
 
@@ -94,6 +95,21 @@ The caller owns both structs once the call succeeds and must call their
 them into an Arrow implementation (`arrow::ImportRecordBatch` in C++,
 `arrow::ffi` in Rust, `RecordBatch._import_from_c` in PyArrow) transfers that
 responsibility to the importer.
+
+## Cleaning data in memory
+
+`kaos_clean_arrow` takes a record batch (a struct array, format `+s`) that
+the caller exported through the C Data Interface, cleans it, and fills the
+output structs as `process_dataset_with_options` does. Input columns may be
+`n`, `b`, the integer formats `c C s S i I l L`, `f`/`g` floats, `u`/`U`
+strings, `tdD`/`tdm` dates, and `tss:`/`tsm:`/`tsu:`/`tsn:` timestamps
+without a time zone; anything else (dictionaries, time zones, nested types)
+is an error. Convert such columns first, as the Python package's
+`clean_table` does.
+
+The library copies the values and **always releases the input structs**,
+on success and on failure, so the caller must not release them again. The
+parsing options (`delimiter`, `decimal`, ...) have no effect here.
 
 ## Streams
 
