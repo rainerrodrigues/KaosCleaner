@@ -146,8 +146,9 @@ function read_chunk(s::CleanStream, i::Int)
         return iterate(s.chunks, i)
     catch e
         is_misfit(e) || rethrow()
-        s.fallback === nothing && (s.fallback = file_chunks(s.fallback_args...))
-        return iterate(s.fallback, i)
+        fallback = s.fallback
+        fallback === nothing && (fallback = s.fallback = file_chunks(s.fallback_args...))
+        return iterate(fallback, i)
     end
 end
 
@@ -189,7 +190,8 @@ function clean_chunk!(s::CleanStream, df::DataFrame)
         df[!, p.name] = out
     end
     s.opts.drop_empty_rows && (s.empty_rows += drop_empty_rows!(df))
-    s.seen === nothing || (s.duplicates += drop_seen_rows!(df, s.seen))
+    seen = s.seen
+    seen === nothing || (s.duplicates += drop_seen_rows!(df, seen))
     impute_stream!(s, df)
     return df
 end
@@ -245,9 +247,9 @@ function drop_seen_rows!(df::DataFrame, seen::Set{Tuple{UInt, UInt}})
 end
 
 function impute_stream!(s::CleanStream, df::DataFrame)
-    s.opts.impute === nothing && return
-    explicit = s.opts.impute isa Dict
-    plan = explicit ? s.opts.impute : Dict(p.name => s.opts.impute for p in s.plan)
+    impute = s.opts.impute
+    impute === nothing && return
+    plan = impute isa Dict ? impute : Dict(p.name => impute for p in s.plan)
     for (name, strategy) in plan
         col = df[!, name]
         T = nonmissingtype(eltype(col))
