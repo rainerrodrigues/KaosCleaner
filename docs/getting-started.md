@@ -6,8 +6,8 @@
 pip install kaos-cleaner
 ```
 
-Wheels are published for Linux x86_64 (glibc 2.17 or newer), Linux aarch64
-(64-bit ARM such as NVIDIA Jetson, Raspberry Pi OS 64-bit and AWS Graviton),
+Wheels are published for Linux x86_64 (glibc 2.17 or newer), Linux aarch64 (glibc 2.18 or newer;
+64-bit ARM such as NVIDIA Jetson, Raspberry Pi OS 64-bit and AWS Graviton),
 Windows x86_64 and macOS on Apple silicon, for Python 3.9 and later. Each wheel contains the
 compiled engine and its Julia runtime, so nothing else needs installing.
 
