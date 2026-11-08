@@ -12,6 +12,7 @@ nav:
       - Getting started: getting-started.md
       - Cleaning options: options.md
       - File formats: file-formats.md
+      - Undo the cleaning: restore.md
       - Large files: large-files.md
       - Logging: logging.md
       - Recipes: recipes.md

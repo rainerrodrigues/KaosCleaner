@@ -15,6 +15,7 @@ problem.
 | `infer_types` | `True` | Convert text columns holding booleans, dates or formatted numbers |
 | `datetime_formats` | none | Date formats to use, e.g. `["dd/mm/yyyy"]` |
 | `impute` | none | Fill missing values (strategy, or `{column: strategy}`) |
+| `source_row` | `False` | Add a first column with each row's position in the source; see [Undo the cleaning](restore.md) |
 
 ### Parsing options
 
@@ -28,6 +29,10 @@ These describe how a text file is written; they apply to files only (not to
 | `thousands` | none | Thousands separator inside numbers, e.g. `"."` for `1.234,50` |
 | `comment` | none | Skip lines starting with this text, e.g. `"#"` |
 | `header` | `1` | Line number of the header row; lines above it are skipped. `0`: no header, columns are named `column1`, `column2`, ... |
+
+The C and Julia interfaces also take `raw` (`false`): read a file as it is,
+every column as untrimmed text, with no missing markers and no cleaning
+steps. `restore` uses it.
 
 `delimiter`, `decimal` and `thousands` must be different characters. A
 European-style file reads like this:

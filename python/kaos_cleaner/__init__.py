@@ -32,7 +32,15 @@ if TYPE_CHECKING:
 PathLike = Union[str, "os.PathLike[str]"]
 
 __version__ = "0.3.0"
-__all__ = ["clean_csv", "clean_file", "clean_table", "process_dataset", "iter_clean_csv", "clean_csv_to_parquet"]
+__all__ = [
+    "clean_csv",
+    "clean_file",
+    "clean_table",
+    "restore",
+    "process_dataset",
+    "iter_clean_csv",
+    "clean_csv_to_parquet",
+]
 
 logger = logging.getLogger("kaos_cleaner")
 logger.addHandler(logging.NullHandler())  # applications decide where logs go
@@ -71,6 +79,8 @@ def _options_json(
     thousands=None,
     comment=None,
     header=None,
+    source_row=None,
+    raw=None,
 ):
     """The options as the engine's JSON; explicit keywords, so typos raise TypeError."""
     options = dict(
@@ -88,6 +98,8 @@ def _options_json(
         thousands=thousands,
         comment=comment,
         header=header,
+        source_row=source_row,
+        raw=raw,
     )
     return json.dumps({k: list(v) if isinstance(v, (tuple, set)) else v for k, v in options.items() if v is not None})
 
@@ -118,6 +130,7 @@ def process_dataset(
     thousands: str | None = None,
     comment: str | None = None,
     header: int | None = None,
+    source_row: bool | None = None,
 ) -> pyarrow.Table:
     """Load and clean a CSV file, returning a pyarrow Table.
 
@@ -155,6 +168,10 @@ def process_dataset(
         header: Line number of the header row; lines above it are skipped.
             0 means the file has no header and columns are named
             ``column1``, ``column2``, ... [1].
+        source_row: Add a first column ``source_row`` holding each row's
+            position among the file's data rows (1 = the first row after the
+            header), so cleaned rows can be traced back with `restore`
+            [False].
 
     Returns:
         pyarrow.Table: The cleaned data.
@@ -163,9 +180,6 @@ def process_dataset(
         RuntimeError: The file is missing or unreadable, or an option is
             invalid; the message is the engine's.
     """
-    import pyarrow as pa
-    from pyarrow.cffi import ffi
-
     options = _options_json(
         drop=drop,
         keep=keep,
@@ -181,7 +195,16 @@ def process_dataset(
         thousands=thousands,
         comment=comment,
         header=header,
+        source_row=source_row,
     )
+    return _run_file(path, options)
+
+
+def _run_file(path: PathLike, options: str) -> pyarrow.Table:
+    """Have the engine read and clean `path` with JSON `options`."""
+    import pyarrow as pa
+    from pyarrow.cffi import ffi
+
     c_schema = ffi.new("struct ArrowSchema*")
     c_array = ffi.new("struct ArrowArray*")
     ptr_schema = int(ffi.cast("uintptr_t", c_schema))
@@ -340,6 +363,16 @@ def _as_batch(data: Any) -> tuple[pyarrow.RecordBatch, str]:
     """The table as one record batch of engine types, and what kind it was."""
     import pyarrow as pa
 
+    table, kind = _to_arrow(data, "clean_table")
+    table = table.combine_chunks()
+    columns = [_engine_type(col.chunk(0) if col.num_chunks else pa.array([], type=col.type)) for col in table.columns]
+    return pa.RecordBatch.from_arrays(columns, names=table.column_names), kind
+
+
+def _to_arrow(data: Any, caller: str) -> tuple[pyarrow.Table, str]:
+    """A pyarrow/polars/pandas table as a pyarrow Table, and what kind it was."""
+    import pyarrow as pa
+
     module = type(data).__module__.split(".")[0]
     if isinstance(data, pa.RecordBatch):
         kind, table = "batch", pa.Table.from_batches([data])
@@ -351,12 +384,28 @@ def _as_batch(data: Any) -> tuple[pyarrow.RecordBatch, str]:
         kind, table = "pandas", pa.Table.from_pandas(data, preserve_index=False)
     else:
         raise TypeError(
-            f"clean_table takes a pyarrow Table or RecordBatch, a polars DataFrame or a pandas DataFrame, "
+            f"{caller} takes a pyarrow Table or RecordBatch, a polars DataFrame or a pandas DataFrame, "
             f"not {type(data).__name__}"
         )
-    table = table.combine_chunks()
-    columns = [_engine_type(col.chunk(0) if col.num_chunks else pa.array([], type=col.type)) for col in table.columns]
-    return pa.RecordBatch.from_arrays(columns, names=table.column_names), kind
+    return table, kind
+
+
+def _from_arrow(table: pyarrow.Table, kind: str) -> Any:
+    """`table` converted back into the `kind` that `_to_arrow` reported."""
+    import pyarrow as pa
+
+    if kind == "polars":
+        import polars as pl
+
+        return pl.from_arrow(table)
+    if kind == "pandas":
+        return table.to_pandas()
+    if kind == "batch":
+        batches = table.combine_chunks().to_batches()
+        if batches:
+            return batches[0]
+        return pa.RecordBatch.from_arrays([pa.array([], f.type) for f in table.schema], schema=table.schema)
+    return table
 
 
 def clean_table(data: Any, **options: Any) -> Any:
@@ -423,14 +472,7 @@ def clean_table(data: Any, **options: Any) -> Any:
 
     if kind == "batch":
         return result
-    table = pa.Table.from_batches([result])
-    if kind == "polars":
-        import polars as pl
-
-        return pl.from_arrow(table)
-    if kind == "pandas":
-        return table.to_pandas()
-    return table
+    return _from_arrow(pa.Table.from_batches([result]), kind)
 
 
 TEXT_EXTENSIONS = {".csv": None, ".txt": None, ".dat": None, ".tsv": "\t", ".tab": "\t", ".psv": "|"}
@@ -472,66 +514,157 @@ def clean_file(path: PathLike, **options: Any) -> polars.DataFrame:
     """
     import polars as pl
 
-    path = os.fspath(path)
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"file not found: {path}")
-    name = path.lower()
-    name = name[:-3] if name.endswith(".gz") else name
-    ext = os.path.splitext(name)[1]
-
+    path, ext = _file_type(path)
     if ext in TEXT_EXTENSIONS:
-        if TEXT_EXTENSIONS[ext] is not None and options.get("delimiter") is None:
-            options["delimiter"] = TEXT_EXTENSIONS[ext]
-        return clean_csv(path, **options)
-    if path.lower().endswith(".gz"):
-        raise ValueError(f"gzip compression is supported for delimited text only, not {ext} files")
-
-    parsing = PARSER_OPTIONS.intersection(k for k, v in options.items() if v is not None)
-    if parsing:
-        raise TypeError(f"the parsing options {sorted(parsing)} apply to delimited text files only")
+        return clean_csv(path, **_text_options(ext, options))
+    _reject_parsing(options, "apply to delimited text files only")
     options = {k: v for k, v in options.items() if k not in PARSER_OPTIONS}
-
-    data: Any
-    if ext in (".parquet", ".pq"):
-        import pyarrow.parquet as pq
-
-        data = pq.read_table(path)
-    elif ext in (".arrow", ".feather", ".ipc"):
-        import pyarrow.feather as feather
-
-        data = feather.read_table(path)
-    elif ext in (".jsonl", ".ndjson"):
-        import pyarrow.json as pj
-
-        data = pj.read_json(path)
-    elif ext == ".json":
-        data = pl.read_json(path)
-    elif ext in EXCEL_EXTENSIONS:
-        try:
-            data = pl.read_excel(path)
-        except ModuleNotFoundError as e:
-            raise ImportError(
-                'reading spreadsheets needs the fastexcel package: pip install "kaos-cleaner[excel]"'
-            ) from e
-    else:
-        supported = sorted(
-            [
-                *TEXT_EXTENSIONS,
-                ".parquet",
-                ".pq",
-                ".arrow",
-                ".feather",
-                ".ipc",
-                ".jsonl",
-                ".ndjson",
-                ".json",
-                *EXCEL_EXTENSIONS,
-            ]
-        )
-        raise ValueError(f"unsupported file type {ext or '(no extension)'!r}; supported: {', '.join(supported)}")
-
+    data = _read_table(path, ext)
     df = clean_table(data, **options)
     if not isinstance(df, pl.DataFrame):
         df = pl.from_arrow(df)
     assert isinstance(df, pl.DataFrame)
     return df
+
+
+def _file_type(path: PathLike) -> tuple[str, str]:
+    """The path as a string and its format extension (".csv" for "x.CSV.gz")."""
+    path = os.fspath(path)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"file not found: {path}")
+    name = path.lower()
+    gz = name.endswith(".gz")
+    ext = os.path.splitext(name[:-3] if gz else name)[1]
+    if gz and ext not in TEXT_EXTENSIONS:
+        raise ValueError(f"gzip compression is supported for delimited text only, not {ext} files")
+    return path, ext
+
+
+def _text_options(ext: str, options: dict[str, Any]) -> dict[str, Any]:
+    """`options` with the delimiter the extension implies (.tsv, .psv) unless one is given."""
+    if TEXT_EXTENSIONS[ext] is not None and options.get("delimiter") is None:
+        return {**options, "delimiter": TEXT_EXTENSIONS[ext]}
+    return options
+
+
+def _reject_parsing(options: Mapping[str, Any], why: str) -> None:
+    parsing = PARSER_OPTIONS.intersection(k for k, v in options.items() if v is not None)
+    if parsing:
+        raise TypeError(f"the parsing options {sorted(parsing)} {why}")
+
+
+def _read_table(path: str, ext: str) -> Any:
+    """Read a file that is not delimited text, as a pyarrow Table or polars DataFrame."""
+    import polars as pl
+
+    if ext in (".parquet", ".pq"):
+        import pyarrow.parquet as pq
+
+        return pq.read_table(path)
+    if ext in (".arrow", ".feather", ".ipc"):
+        import pyarrow.feather as feather
+
+        return feather.read_table(path)
+    if ext in (".jsonl", ".ndjson"):
+        import pyarrow.json as pj
+
+        return pj.read_json(path)
+    if ext == ".json":
+        return pl.read_json(path)
+    if ext in EXCEL_EXTENSIONS:
+        try:
+            return pl.read_excel(path)
+        except ModuleNotFoundError as e:
+            raise ImportError(
+                'reading spreadsheets needs the fastexcel package: pip install "kaos-cleaner[excel]"'
+            ) from e
+    supported = sorted(
+        [*TEXT_EXTENSIONS, ".parquet", ".pq", ".arrow", ".feather", ".ipc", ".jsonl", ".ndjson", ".json"]
+        + list(EXCEL_EXTENSIONS)
+    )
+    raise ValueError(f"unsupported file type {ext or '(no extension)'!r}; supported: {', '.join(supported)}")
+
+
+def _source_rows(cleaned: Any) -> list[int]:
+    """The `source_row` column of a cleaned pyarrow, polars or pandas table."""
+    table, _ = _to_arrow(cleaned, "restore")
+    if "source_row" not in table.column_names:
+        raise ValueError("the cleaned data has no source_row column; clean it with source_row=True")
+    rows = table.column("source_row").to_pylist()
+    if any(r is None for r in rows):
+        raise ValueError("source_row has missing values; restore needs every row's source position")
+    return rows
+
+
+def restore(cleaned: Any, source: Any, *, rows: str = "kept", **parsing: Any) -> Any:
+    """Undo the cleaning: get the original, untouched rows back.
+
+    Cleaning trims text, converts types, renames columns and drops rows, and
+    none of that can be reversed from the cleaned values alone ("$1,250.00"
+    and "1250" both become 1250). So clean with ``source_row=True``, which
+    records where each row came from, and `restore` reads those rows from
+    the source exactly as they were: original column names, every value as
+    the text in the file, nothing treated as missing.
+
+    Args:
+        cleaned: The cleaned data (pyarrow, polars or pandas), with its
+            ``source_row`` column. Ignored when ``rows="all"``.
+        source: What was cleaned: a file path (any format `clean_file`
+            reads), or the original pyarrow, polars or pandas table.
+        rows: Which original rows to return: "kept" (the rows of `cleaned`,
+            in its order), "dropped" (the rows cleaning removed as empty or
+            duplicate, in file order) or "all" (the whole source).
+        **parsing: The parsing options (`delimiter`, `decimal`, `thousands`,
+            `comment`, `header`) the file was cleaned with, so rows are
+            counted the same way. Text files only.
+
+    Returns:
+        A polars DataFrame for a file source; the same type as `source` for
+        a table. Text files come back with every column as text.
+
+    Raises:
+        ValueError: `cleaned` has no usable ``source_row`` column, its
+            positions do not fit the source, or `rows` is unknown.
+        TypeError: Parsing options were given for a source that is not a
+            delimited text file, or a type is unsupported.
+
+    Example:
+        >>> df = clean_csv("orders.csv", source_row=True)
+        >>> original = restore(df, "orders.csv")            # the same rows, as in the file
+        >>> removed = restore(df, "orders.csv", rows="dropped")
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    if rows not in ("kept", "dropped", "all"):
+        raise ValueError(f'rows must be "kept", "dropped" or "all", not {rows!r}')
+    unknown = set(parsing) - PARSER_OPTIONS
+    if unknown:
+        raise TypeError(f"restore got unexpected keyword arguments {sorted(unknown)}")
+    positions = None if rows == "all" else [r - 1 for r in _source_rows(cleaned)]
+
+    if isinstance(source, (str, os.PathLike)):
+        path, ext = _file_type(source)
+        kind = "polars"
+        if ext in TEXT_EXTENSIONS:
+            original = _run_file(path, _options_json(raw=True, **_text_options(ext, parsing)))
+        else:
+            _reject_parsing(parsing, "apply to delimited text files only")
+            original, _ = _to_arrow(_read_table(path, ext), "restore")
+    else:
+        _reject_parsing(parsing, "apply to files only")
+        original, kind = _to_arrow(source, "restore")
+
+    if positions is not None:
+        n = original.num_rows
+        if any(not 0 <= p < n for p in positions):
+            raise ValueError(
+                f"source_row values outside 1..{n}: was the data cleaned from another source, "
+                "or with other parsing options?"
+            )
+        if rows == "kept":
+            original = original.take(pa.array(positions, pa.int64()))
+        else:
+            kept = pc.is_in(pa.array(range(n), pa.int64()), value_set=pa.array(positions, pa.int64()))
+            original = original.filter(pc.invert(kept))
+    return _from_arrow(original, kind)

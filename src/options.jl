@@ -32,6 +32,10 @@ Base.@kwdef struct CleanOptions
     comment::Union{Nothing, String} = nothing
     "Line number of the header row (lines above it are skipped); 0 when the file has none."
     header::Int = 1
+    "Add a first column `source_row`: each row's position among the input's data rows (1 = first)."
+    source_row::Bool = false
+    "Read a file as it is: every column as untrimmed text, no missing markers, no cleaning steps."
+    raw::Bool = false
 end
 
 """
@@ -61,7 +65,7 @@ function check_parsing(o::CleanOptions)
 end
 
 function option_value(key::Symbol, value)
-    if key in (:rename, :dedupe, :drop_empty_rows, :infer_types)
+    if key in (:rename, :dedupe, :drop_empty_rows, :infer_types, :source_row, :raw)
         value isa Bool || throw(ArgumentError("option `$key` must be true or false, got $(repr(value))"))
         return value
     elseif key in (:delimiter, :decimal, :thousands)
