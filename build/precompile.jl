@@ -48,7 +48,8 @@ Y,40,28/02/2024,3,A
 """)
 options = """{"drop": ["City"], "impute": {"score": "median"}, "missing_values": ["-"],
               "datetime_formats": ["dd/mm/yyyy"]}"""
-for opts in (options, """{"impute": "ffill"}""", """{"impute": "mean"}""", """{"impute": "mode"}""")
+for opts in (options, """{"impute": "ffill"}""", """{"impute": "mean"}""", """{"impute": "mode"}""",
+             """{"source_row": true}""", """{"raw": true, "source_row": true}""")
     schema = Libc.calloc(1, sizeof(ArrowSchema))
     array = Libc.calloc(1, sizeof(ArrowArray))
     rc = GC.@preserve messy opts KaosCleaner.process_dataset_with_options(
@@ -103,7 +104,7 @@ open(misfit, "w") do io
         println(io, late ? "$(i).5" : string(i), ",", late ? "soon" : "2024-01-02T10:30:00", ",x", i)
     end
 end
-for (file, opts) in ((big, ""), (big, """{"impute": "ffill"}"""), (misfit, ""))
+for (file, opts) in ((big, ""), (big, """{"impute": "ffill", "source_row": true}"""), (misfit, ""))
     st = Ptr{ArrowArrayStream}(Libc.calloc(1, sizeof(ArrowArrayStream)))
     rc = GC.@preserve file opts KaosCleaner.kaos_open_stream(
         Base.unsafe_convert(Cstring, file), Base.unsafe_convert(Cstring, opts), Int64(256 * 1024), Ptr{Cvoid}(st))

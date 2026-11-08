@@ -6,6 +6,8 @@
 
 ::: kaos_cleaner.clean_table
 
+::: kaos_cleaner.restore
+
 ::: kaos_cleaner.process_dataset
 
 ::: kaos_cleaner.iter_clean_csv

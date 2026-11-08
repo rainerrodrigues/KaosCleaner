@@ -53,6 +53,7 @@ mutable struct CleanStream
     rows::Int
     empty_rows::Int
     duplicates::Int
+    parsed::Int                                   # data rows read so far, for source_row
     error::String
 end
 
@@ -103,7 +104,10 @@ about `chunk_bytes`.
 function open_stream(path::AbstractString, opts::CleanOptions, chunk_bytes::Integer)
     isfile(path) || throw(ArgumentError("file not found: $path"))
     chunk_bytes > 0 || throw(ArgumentError("chunk size must be positive"))
+    opts.raw && throw(ArgumentError("the raw option reads a whole file; it is not available when streaming"))
     plan = stream_plan(path, opts)
+    opts.source_row && any(p -> p.name == "source_row", plan) &&
+        throw(ArgumentError("the data already has a column named `source_row`; rename or drop it to use source_row"))
     check_streaming_impute(plan, opts)
     nchunks = max(1, cld(filesize(path), chunk_bytes))
     # Chunks are parsed with the planned types in strict mode, which is fast
@@ -118,7 +122,7 @@ function open_stream(path::AbstractString, opts::CleanOptions, chunk_bytes::Inte
     chunks = file_chunks(path, nchunks, (; base..., types=typed, strict=true))
     seen = opts.dedupe ? Set{Tuple{UInt, UInt}}() : nothing
     return CleanStream(plan, opts, Markers(opts.missing_values), chunks, nothing,
-                       (String(path), nchunks, (; base..., types=text)), 1, seen, Dict{String, Any}(), 0, 0, 0, "")
+                       (String(path), nchunks, (; base..., types=text)), 1, seen, Dict{String, Any}(), 0, 0, 0, 0, "")
 end
 
 """
@@ -177,6 +181,8 @@ fits(col, T) = nonmissingtype(eltype(col)) !== Union{} &&
                eltype(col) <: Union{Missing, (T === String ? AbstractString : T)}
 
 function clean_chunk!(s::CleanStream, df::DataFrame)
+    rows = s.opts.source_row ? collect(s.parsed .+ (1:nrow(df))) : nothing
+    s.parsed += nrow(df)
     rename!(df, [p.source => p.name for p in s.plan])
     select!(df, [p.name for p in s.plan])
     clean_strings!(df, s.markers)
@@ -187,11 +193,11 @@ function clean_chunk!(s::CleanStream, df::DataFrame)
         failures > 0 && @warn "$failures value$(failures == 1 ? "" : "s") in `$(p.name)` did not fit $(nameof(p.out_type)) and became missing"
         df[!, p.name] = out
     end
-    s.opts.drop_empty_rows && (s.empty_rows += drop_empty_rows!(df))
+    s.opts.drop_empty_rows && (s.empty_rows += drop_empty_rows!(df, rows))
     seen = s.seen
-    seen === nothing || (s.duplicates += drop_seen_rows!(df, seen))
+    seen === nothing || (s.duplicates += drop_seen_rows!(df, seen, rows))
     impute_stream!(s, df)
-    return df
+    return add_source_row!(df, rows)
 end
 
 """
@@ -227,7 +233,7 @@ function coerce_value(::Type{T}, x) where {T}
 end
 
 "Drop rows whose fingerprint was seen in this or an earlier batch."
-function drop_seen_rows!(df::DataFrame, seen::Set{Tuple{UInt, UInt}})
+function drop_seen_rows!(df::DataFrame, seen::Set{Tuple{UInt, UInt}}, rows::Union{Nothing, Vector{Int}}=nothing)
     h1 = zeros(UInt, nrow(df))
     h2 = fill(UInt(0x9e3779b97f4a7c15), nrow(df))  # second, independently seeded hash
     for col in eachcol(df)
@@ -241,6 +247,7 @@ function drop_seen_rows!(df::DataFrame, seen::Set{Tuple{UInt, UInt}})
     end
     n = count(dup)
     n > 0 && deleteat!(df, dup)
+    n > 0 && rows !== nothing && deleteat!(rows, dup)
     return n
 end
 
@@ -275,6 +282,7 @@ function stream_get_schema(p::Ptr{ArrowArrayStream}, out::Ptr{ArrowSchema})::Cin
     s === nothing && return EINVAL
     try
         empty = DataFrame([pl.name => Vector{Union{Missing, pl.out_type}}() for pl in s.plan])
+        s.opts.source_row && insertcols!(empty, 1, "source_row" => Int[])
         tmp = Ptr{ArrowArray}(Libc.calloc(1, sizeof(ArrowArray)))
         try
             export_dataframe(empty, out, tmp; nullable=true)

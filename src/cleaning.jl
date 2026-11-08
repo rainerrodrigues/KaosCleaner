@@ -21,10 +21,12 @@ load_dataset(path::AbstractString; missing_values::Vector{String}=String[]) =
 
 "CSV.jl keyword arguments for the parsing options in `opts`."
 function csv_options(opts::CleanOptions)
-    kw = (missingstring=vcat(MISSING_STRINGS, opts.missing_values), stripwhitespace=true,
-          decimal=only(opts.decimal), header=opts.header == 0 ? false : opts.header)
+    header = opts.header == 0 ? false : opts.header
+    kw = opts.raw ? (types=String, missingstring=nothing, stripwhitespace=false, header) :
+         (missingstring=vcat(MISSING_STRINGS, opts.missing_values), stripwhitespace=true,
+          decimal=only(opts.decimal), header)
     opts.delimiter === nothing || (kw = (; kw..., delim=only(opts.delimiter)))
-    opts.thousands === nothing || (kw = (; kw..., groupmark=only(opts.thousands)))
+    opts.thousands === nothing || opts.raw || (kw = (; kw..., groupmark=only(opts.thousands)))
     opts.comment === nothing || (kw = (; kw..., comment=opts.comment))
     return kw
 end
@@ -134,6 +136,12 @@ clean_dataset(df::AbstractDataFrame, opts::CleanOptions=CleanOptions()) =
 owns, such as one fresh from [`load_dataset`](@ref). Saves copying every column.
 """
 function clean_dataset!(df::DataFrame, opts::CleanOptions=CleanOptions())
+    rows = opts.source_row ? collect(1:nrow(df)) : nothing  # input positions of the remaining rows
+    if opts.raw
+        select_columns!(df, CleanOptions(; opts.keep, opts.drop, rename=false))
+        raw_strings!(df)
+        return add_source_row!(df, rows)
+    end
     opts.rename && rename!(df, normalize_name.(names(df)); makeunique=true)
     select_columns!(df, opts)
 
@@ -141,23 +149,56 @@ function clean_dataset!(df::DataFrame, opts::CleanOptions=CleanOptions())
     opts.infer_types && infer_types!(df, opts)
 
     if opts.drop_empty_rows
-        n = drop_empty_rows!(df)
+        n = drop_empty_rows!(df, rows)
         n > 0 && @info "Dropped $n empty row$(n == 1 ? "" : "s")"
     end
 
     if opts.dedupe
         dup = duplicate_rows(df)
         n = count(dup)
-        n > 0 && (deleteat!(df, dup); @info "Dropped $n duplicate row$(n == 1 ? "" : "s")")
+        if n > 0
+            deleteat!(df, dup)
+            rows === nothing || deleteat!(rows, dup)
+            @info "Dropped $n duplicate row$(n == 1 ? "" : "s")"
+        end
     end
 
     impute!(df, opts)
     disallowmissing!(df; error=false)
+    return add_source_row!(df, rows)
+end
+
+"""
+    add_source_row!(df, rows) -> df
+
+Insert `rows` (input positions, 1-based) as the first column, `source_row`.
+`nothing` leaves `df` alone.
+"""
+add_source_row!(df::DataFrame, ::Nothing) = df
+function add_source_row!(df::DataFrame, rows::Vector{Int})
+    "source_row" in names(df) &&
+        throw(ArgumentError("the data already has a column named `source_row`; rename or drop it to use source_row"))
+    return insertcols!(df, 1, "source_row" => rows)
+end
+
+"Text cells as valid UTF-8, otherwise untouched (the raw option)."
+function raw_strings!(df::DataFrame)
+    for name in names(df)
+        col = df[!, name]
+        if nonmissingtype(eltype(col)) <: AbstractString && any(x -> !ismissing(x) && !isvalid(x), col)
+            df[!, name] = [ismissing(x) ? missing : String(valid_utf8(x)) for x in col]
+        end
+    end
     return df
 end
 
-"Delete rows where every value is missing; returns how many were dropped."
-function drop_empty_rows!(df::DataFrame)
+"""
+    drop_empty_rows!(df, rows=nothing) -> Int
+
+Delete rows where every value is missing, and the same positions of `rows`
+when given; returns how many were dropped.
+"""
+function drop_empty_rows!(df::DataFrame, rows::Union{Nothing, Vector{Int}}=nothing)
     # A row can only be entirely missing if every column allows missing values
     (ncol(df) > 0 && all(col -> Missing <: eltype(col), eachcol(df))) || return 0
     empty_row = trues(nrow(df))
@@ -166,6 +207,7 @@ function drop_empty_rows!(df::DataFrame)
     end
     n = count(empty_row)
     n > 0 && deleteat!(df, empty_row)
+    n > 0 && rows !== nothing && deleteat!(rows, empty_row)
     return n
 end
 

@@ -232,6 +232,13 @@ end
         @test occursin("needs the whole file", read_stream(path, """{"impute": "median"}"""))
         @test occursin("file not found", read_stream(joinpath(dir, "nope.csv")))
         @test isempty(KaosCleaner.STREAMS)                           # every stream released
+
+        # source_row survives chunking, empty-row and cross-chunk duplicate drops
+        tracked = reduce(vcat, read_stream(path, """{"source_row": true}"""))
+        o = CleanOptions(source_row=true)
+        @test isequal(tracked, clean_dataset!(load_dataset(path, o), o))
+        @test tracked.source_row == sort(tracked.source_row) && names(tracked)[1] == "source_row"
+        @test occursin("not available when streaming", read_stream(path, """{"raw": true}"""))
     end
 
     @testset "byte_summary fast path matches the generic loop" begin
@@ -293,6 +300,32 @@ end
         @test_throws ArgumentError KaosCleaner.parse_options("""{"decimal": ",", "delimiter": ","}""")
         @test_throws ArgumentError KaosCleaner.parse_options("""{"delimiter": "ab"}""")
         @test_throws ArgumentError KaosCleaner.parse_options("""{"header": true}""")
+    end
+
+    @testset "source rows and raw reading" begin
+        dir = mktempdir()
+        path = joinpath(dir, "messy.csv")
+        write(path, " Customer ID ,Spend\n 1 ,NA\n 1 ,NA\n\n,\n2,\"\$1,250\"\n")
+        o = CleanOptions(source_row=true)
+        df = clean_dataset!(load_dataset(path, o), o)
+        @test names(df) == ["source_row", "customer_id", "spend"]
+        @test df.source_row == [1, 4] && df.spend[2] == 1250    # rows 2 (duplicate) and 3 (empty) dropped
+        r = CleanOptions(raw=true, source_row=true)
+        raw = clean_dataset!(load_dataset(path, r), r)
+        @test names(raw) == ["source_row", " Customer ID ", "Spend"]
+        @test raw[!, " Customer ID "] == [" 1 ", " 1 ", "", "2"] && raw.Spend == ["NA", "NA", "", "\$1,250"]
+        @test raw[df.source_row, "Spend"] == ["NA", "\$1,250"]  # the original cells of the cleaned rows
+        eu = CleanOptions(raw=true, delimiter=";", decimal=",", thousands=".")  # number marks do not apply
+        write(joinpath(dir, "eu.csv"), "a;b\n1.234,5;x\n")
+        @test clean_dataset!(load_dataset(joinpath(dir, "eu.csv"), eu), eu).a == ["1.234,5"]
+        k = CleanOptions(raw=true, keep=["Spend"])
+        @test names(clean_dataset!(load_dataset(path, k), k)) == ["Spend"]
+        # tables: positions in the input; a clash with an existing column is an error
+        t = clean_dataset(DataFrame(a=[1, 1, missing, 2]), o)
+        @test t.source_row == [1, 4]
+        @test_throws ArgumentError clean_dataset(DataFrame(source_row=[1]), o)
+        @test KaosCleaner.parse_options("""{"source_row": true, "raw": true}""").raw
+        @test_throws ArgumentError KaosCleaner.parse_options("""{"raw": 1}""")
     end
 
     @testset "streaming coercion" begin

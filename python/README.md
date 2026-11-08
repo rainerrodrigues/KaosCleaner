@@ -46,6 +46,16 @@ df = clean_csv("umsatz.csv", delimiter=";", decimal=",", thousands=".")
 df = clean_table(pandas_or_polars_or_arrow)   # returns the same kind
 ```
 
+## Undo the cleaning
+
+```python
+from kaos_cleaner import restore
+
+df = clean_csv("orders.csv", source_row=True)   # remembers each row's position
+original = restore(df, "orders.csv")            # those rows exactly as in the file
+removed = restore(df, "orders.csv", rows="dropped")
+```
+
 ## Files larger than memory
 
 ```python
