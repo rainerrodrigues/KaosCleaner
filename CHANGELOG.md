@@ -5,6 +5,17 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.3.0 (2026-11-08)
+
+### Features
+
+- Clean_file for Parquet, Arrow, JSON and Excel, and clean_table
+  ([`562b725`](https://github.com/rainerrodrigues/KaosCleaner/commit/562b725152b471b4865cb81f588eaeba87e9ddab))
+
+- Parsing options and in-memory cleaning in the engine
+  ([`9d4f35a`](https://github.com/rainerrodrigues/KaosCleaner/commit/9d4f35a0d710b5397105f6882a6970e6656354f3))
+
+
 ## v0.2.0 (2026-11-08)
 
 ### Documentation

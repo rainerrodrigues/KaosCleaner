@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 PathLike = Union[str, "os.PathLike[str]"]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = ["clean_csv", "clean_file", "clean_table", "process_dataset", "iter_clean_csv", "clean_csv_to_parquet"]
 
 logger = logging.getLogger("kaos_cleaner")
