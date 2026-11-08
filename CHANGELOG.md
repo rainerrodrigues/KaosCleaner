@@ -5,6 +5,24 @@ release; see `releaserc.toml`.
 
 <!-- version list -->
 
+## v0.2.0 (2026-11-08)
+
+### Documentation
+
+- Julia usage page, code-quality checks and registry steps
+  ([`977b359`](https://github.com/rainerrodrigues/KaosCleaner/commit/977b359279767d60d7947079ba945d886e433345))
+
+### Features
+
+- C SDK downloads with a pkg-config file on every release
+  ([`617efcd`](https://github.com/rainerrodrigues/KaosCleaner/commit/617efcd8d63abd3fb3a163b610832964c7041ce0))
+
+### Refactoring
+
+- Read nullable stream fields into locals (JET-clean)
+  ([`cef68c4`](https://github.com/rainerrodrigues/KaosCleaner/commit/cef68c4e89558108587b25f94496789a7231b356))
+
+
 ## v0.1.4 (2026-11-07)
 
 ### Bug Fixes
