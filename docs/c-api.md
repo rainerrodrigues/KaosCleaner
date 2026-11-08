@@ -9,7 +9,8 @@ caller.
 
 Each [GitHub release](https://github.com/rainerrodrigues/KaosCleaner/releases)
 has a C SDK per platform, `libkaoscleaner-<version>-<os>-<arch>.tar.xz`
-(for example `libkaoscleaner-0.1.5-linux-x86_64.tar.xz`). Unpack it anywhere
+(for example `libkaoscleaner-0.3.0-linux-x86_64.tar.xz` or
+`libkaoscleaner-0.3.0-linux-aarch64.tar.xz`). Unpack it anywhere
 and build against it with pkg-config:
 
 ```bash
