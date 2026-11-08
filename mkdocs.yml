@@ -17,6 +17,7 @@ nav:
       - Troubleshooting: troubleshooting.md
   - Reference:
       - Python API: api.md
+      - Julia: julia.md
       - C API: c-api.md
   - Background:
       - How it works: how-it-works.md

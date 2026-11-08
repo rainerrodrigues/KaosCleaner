@@ -80,6 +80,32 @@ mkdocs serve
 
 The API reference comes from the docstrings in `python/kaos_cleaner`.
 
+## Code quality checks
+
+```bash
+pip install pre-commit && pre-commit install
+```
+
+pre-commit then runs ruff (lint and format) and a few file checks on every
+commit. CI runs the same ruff checks plus mypy on every pull request:
+
+```bash
+ruff check python/ scripts/ && ruff format --check python/ scripts/
+```
+```bash
+cd python && mypy
+```
+
+On the Julia side, the test suite includes [Aqua.jl](https://github.com/JuliaTesting/Aqua.jl)
+(compat bounds, unused dependencies, piracy, ambiguities). For deeper checks,
+[JET.jl](https://github.com/aviatesk/JET.jl) finds type instabilities and
+calls that cannot succeed:
+
+```julia
+using JET, KaosCleaner
+report_package(KaosCleaner; target_modules=(KaosCleaner,))
+```
+
 ## Commit messages
 
 Releases are generated from commit messages, so use
@@ -134,3 +160,20 @@ PyPI enforces two things only at upload time, so both are checked earlier:
   get there (Linux ~81 MiB, Windows ~74 MiB, macOS ~68 MiB).
 - **Classifiers**: every classifier in `python/pyproject.toml` must be on
   PyPI's official list; `python/tests/test_metadata.py` checks this in CI.
+
+## Publishing to Julia's General registry
+
+The Julia package (`KaosCleaner`) can be registered so that Julia users get
+it with `Pkg.add("KaosCleaner")`. `Project.toml` already has the required
+compat bounds for every dependency and for Julia itself, which Aqua.jl checks.
+
+1. Install the [JuliaRegistrator](https://github.com/JuliaRegistries/Registrator.jl)
+   GitHub app on this repository.
+2. On the commit to register (a release commit on `main`), comment
+   `@JuliaRegistrator register`. Registrator opens a pull request on
+   [General](https://github.com/JuliaRegistries/General).
+3. New packages wait three days before the pull request is merged
+   automatically, provided the automated checks pass.
+4. Every later release needs the same comment on its release commit;
+   versions come from `Project.toml`, which semantic-release keeps in step
+   with the Python package.
