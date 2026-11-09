@@ -110,7 +110,7 @@ jobs:
           python -m pytest "$GITHUB_WORKSPACE/python/tests" -v -p no:cacheprovider
 
       - name: Upload wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.os }}
           path: dist/*.whl
@@ -129,7 +129,7 @@ jobs:
           ls -l sdk
 
       - name: Upload C SDK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sdk-${{ matrix.os }}
           path: sdk/*.tar.xz
@@ -148,7 +148,7 @@ jobs:
           path: dist
 
       - name: Upload wheel set
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kaos-cleaner-wheels
           path: dist/*.whl
