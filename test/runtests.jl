@@ -148,7 +148,11 @@ end
 
     @testset "streaming (Arrow C Stream Interface)" begin
         # Consume a stream through its C callbacks, as pyarrow does
-        function read_stream(path, options="", chunk_bytes=64)
+        # 512-byte chunks keep ~40 rows per chunk for the 200-row file below: CSV.jl
+        # only splits when it estimates at least 5 rows per task, and 64-byte chunks
+        # (~5 rows) sat on that edge, so CSV.jl 0.10.17's slightly lower row estimate
+        # turned "really chunked" into a single CSV.File.
+        function read_stream(path, options="", chunk_bytes=512)
             st = Ptr{ArrowArrayStream}(Libc.calloc(1, sizeof(ArrowArrayStream)))
             rc = GC.@preserve path options KaosCleaner.kaos_open_stream(
                 Base.unsafe_convert(Cstring, path), Base.unsafe_convert(Cstring, options), Int64(chunk_bytes), Ptr{Cvoid}(st))
