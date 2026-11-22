@@ -55,10 +55,10 @@ jobs:
 
       - name: Use the newest compatible Julia packages (weekly run)
         if: github.event_name == 'schedule'
-        run: julia --project=. -e "using Pkg; Pkg.update()"
+        run: julia --project=julia/KaosCleaner.jl -e "using Pkg; Pkg.update()"
 
       - name: Julia tests
-        run: julia --project=. -e "using Pkg; Pkg.instantiate(); Pkg.test()"
+        run: julia --project=julia/KaosCleaner.jl -e "using Pkg; Pkg.instantiate(); Pkg.test()"
 
       - name: Compile libkaoscleaner
         run: julia build.jl

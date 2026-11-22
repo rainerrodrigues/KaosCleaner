@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- [Julia](https://julialang.org/downloads/) 1.12 (the version in `Manifest.toml`)
+- [Julia](https://julialang.org/downloads/) 1.12 (the version in `julia/KaosCleaner.jl/Manifest.toml`)
 - Python 3.9+
 - A C compiler (PackageCompiler uses it to link the library; on Windows it
   downloads one itself)
@@ -12,25 +12,26 @@
 
 | Path | What |
 |---|---|
-| `src/KaosCleaner.jl` | Module and C entry points |
-| `src/options.jl` | Cleaning options and their JSON parsing |
-| `src/cleaning.jl` | Loading, text cleaning, renaming, selection, deduplication |
-| `src/inference.jl` | Type inference and imputation |
-| `src/logging.jl` | Buffered logging for the host |
-| `src/cdata.jl` | Arrow C Data Interface export |
-| `src/streaming.jl` | Chunked processing and the Arrow C Stream Interface |
+| `julia/KaosCleaner.jl/` | The Julia package (registered in General from this subdirectory) |
+| `julia/KaosCleaner.jl/src/KaosCleaner.jl` | Module and C entry points |
+| `julia/KaosCleaner.jl/src/options.jl` | Cleaning options and their JSON parsing |
+| `julia/KaosCleaner.jl/src/cleaning.jl` | Loading, text cleaning, renaming, selection, deduplication |
+| `julia/KaosCleaner.jl/src/inference.jl` | Type inference and imputation |
+| `julia/KaosCleaner.jl/src/logging.jl` | Buffered logging for the host |
+| `julia/KaosCleaner.jl/src/cdata.jl` | Arrow C Data Interface export |
+| `julia/KaosCleaner.jl/src/streaming.jl` | Chunked processing and the Arrow C Stream Interface |
 | `build.jl`, `build/` | Engine build: PackageCompiler environment, precompile trace, thread-safe init (`kaos_init.c`) |
 | `include/kaoscleaner.h` | C API |
 | `python/kaos_cleaner/` | Python package: `__init__.py` (public API), `_runtime.py` (finding, unpacking and loading the engine) |
 | `scripts/build_wheel.py` | Packs a build into a platform wheel |
 | `scripts/benchmark.py` | Times pandas, Polars and kaos-cleaner on generated data |
-| `test/`, `python/tests/` | Julia and Python tests |
+| `julia/KaosCleaner.jl/test/`, `python/tests/` | Julia and Python tests |
 | `docs/`, `mkdocs.yml` | This site |
 
 ## Test the engine
 
 ```bash
-julia --project=. -e 'using Pkg; Pkg.test()'
+julia --project=julia/KaosCleaner.jl -e 'using Pkg; Pkg.test()'
 ```
 
 The Julia tests exercise everything, including the C entry points and the
@@ -149,9 +150,11 @@ Most upkeep runs without you:
   waits for your approval.
 
 None of these commits are `feat:` or `fix:`, so maintenance alone never
-cuts a release. TagBot is not used: semantic-release already tags each
-version and keeps `Project.toml` in step, which is what Julia's registry
-needs.
+cuts a release. semantic-release tags each release `vX.Y.Z` and keeps
+`julia/KaosCleaner.jl/Project.toml` in step. Julia's registry wants its own
+tags created *after* a version is registered, so **TagBot** (`TagBot.yml`,
+with `subdir: julia/KaosCleaner.jl`) tags registered Julia versions
+`KaosCleaner-vX.Y.Z`, separate from the `vX.Y.Z` tags of the Python package.
 
 To test the Windows and macOS wheels of a branch before merging:
 
@@ -165,7 +168,7 @@ Merging to `main` is releasing. `build_wheel.yml`:
 
 1. runs python-semantic-release (`releaserc.toml`), which reads the commits
    since the last tag and, if a release is due, bumps the version in
-   `Project.toml` and `python/kaos_cleaner/__init__.py`, updates
+   `julia/KaosCleaner.jl/Project.toml` and `python/kaos_cleaner/__init__.py`, updates
    `CHANGELOG.md`, commits, tags `vX.Y.Z` and creates a GitHub release;
 2. builds the engine and a wheel on Linux, Windows and macOS from that tag,
    and tests each installed wheel;
@@ -250,22 +253,29 @@ A green run with no new pull request means every dependency is within its
 bounds. When it does open one, merge it once CI passes; its commits are not
 Conventional Commits, so this never cuts a release. It changes only the
 allowed versions: the compiled library keeps the exact versions pinned in
-`Manifest.toml` until you run `julia --project=. -e "using Pkg; Pkg.update()"`
+`julia/KaosCleaner.jl/Manifest.toml` until you run
+`julia --project=julia/KaosCleaner.jl -e "using Pkg; Pkg.update()"`
 and commit the result (the weekly CI run already tests the newest versions).
 
 ## Publishing to Julia's General registry
 
-The Julia package (`KaosCleaner`) can be registered so that Julia users get
-it with `Pkg.add("KaosCleaner")`. `Project.toml` already has the required
-compat bounds for every dependency and for Julia itself, which Aqua.jl checks.
+The Julia package (`KaosCleaner`) is registered from the subdirectory
+`julia/KaosCleaner.jl`, so Julia users get it with `Pkg.add("KaosCleaner")`.
+General requires a registered package's repository to be named `Name.jl`;
+a package in a subdirectory is exempt, which is why the Julia code lives
+there instead of at the root. The subdirectory is distributed on its own by
+the package server, so it carries its own `README.md` and a copy (not a
+symlink) of `LICENSE`. Its `Project.toml` has compat bounds for every
+dependency and for Julia itself, which Aqua.jl checks.
 
-1. Install the [JuliaRegistrator](https://github.com/JuliaRegistries/Registrator.jl)
-   GitHub app on this repository.
+1. The [JuliaTeam Registrator](https://github.com/apps/juliateam-registrator)
+   GitHub app is installed on this repository.
 2. On the commit to register (a release commit on `main`), comment
-   `@JuliaRegistrator register`. Registrator opens a pull request on
-   [General](https://github.com/JuliaRegistries/General).
+   `@JuliaRegistrator register subdir=julia/KaosCleaner.jl`. Registrator opens
+   a pull request on [General](https://github.com/JuliaRegistries/General).
 3. New packages wait three days before the pull request is merged
    automatically, provided the automated checks pass.
 4. Every later release needs the same comment on its release commit;
-   versions come from `Project.toml`, which semantic-release keeps in step
-   with the Python package.
+   versions come from `julia/KaosCleaner.jl/Project.toml`, which
+   semantic-release keeps in step with the Python package. After each
+   registration, TagBot tags the commit `KaosCleaner-vX.Y.Z`.
