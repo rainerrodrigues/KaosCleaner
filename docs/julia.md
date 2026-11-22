@@ -6,10 +6,11 @@ DataFrames.
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/rainerrodrigues/KaosCleaner")
+Pkg.add(url="https://github.com/rainerrodrigues/KaosCleaner", subdir="julia/KaosCleaner.jl")
 ```
 
-Once the package is in Julia's General registry, this becomes
+The Julia package lives in the `julia/KaosCleaner.jl` folder of the
+repository. Once it is in Julia's General registry, this becomes
 `Pkg.add("KaosCleaner")`.
 
 ## Clean a file

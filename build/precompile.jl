@@ -25,7 +25,7 @@ open(big, "w") do io
 end
 
 csvs = [path, big]
-sample = joinpath(@__DIR__, "..", "test_set.csv")
+sample = joinpath(@__DIR__, "..", "julia", "KaosCleaner.jl", "test", "test_set.csv")
 isfile(sample) && push!(csvs, sample)
 
 for csv in csvs
