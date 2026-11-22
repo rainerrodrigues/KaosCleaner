@@ -546,7 +546,7 @@ end
         @test isequal(back.score, [1.5, missing])
         @test back.when == [Date(2024, 1, 1), Date(2024, 1, 2)]
 
-        sample = joinpath(@__DIR__, "..", "test_set.csv")
+        sample = joinpath(@__DIR__, "test_set.csv")
         if isfile(sample)
             rc, back = export_and_read((s, a) -> KaosCleaner.process_dataset(sample, s, a))
             @test rc == 0

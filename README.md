@@ -131,8 +131,7 @@ PyArrow wraps them without copying. More in
 
 | Path | What it is |
 |---|---|
-| `src/` | Julia engine: options, cleaning, type inference, logging, Arrow export, streaming |
-| `test/` | Julia tests |
+| `julia/KaosCleaner.jl/` | The Julia engine as a standalone Julia package (`src/`: options, cleaning, type inference, logging, Arrow export, streaming; `test/`: Julia tests) |
 | `python/kaos_cleaner/` | The Python package |
 | `python/tests/` | Python bridge tests and benchmarks |
 | `build.jl`, `build/` | Compile the engine with PackageCompiler |

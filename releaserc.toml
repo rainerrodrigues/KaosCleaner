@@ -11,7 +11,7 @@ major_on_zero = false # breaking changes bump 0.x -> 0.(x+1) until a deliberate 
 commit_message = "chore(release): v{version}"
 commit_author = { env = "GIT_COMMIT_AUTHOR", default = "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" }
 # Keep the Julia package and the Python package on the same version
-version_toml = ["Project.toml:version"]
+version_toml = ["julia/KaosCleaner.jl/Project.toml:version"]
 version_variables = ["python/kaos_cleaner/__init__.py:__version__"]
 
 [semantic_release.branches.main]

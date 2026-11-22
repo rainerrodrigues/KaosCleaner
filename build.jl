@@ -3,7 +3,8 @@
 # into the library.
 import Pkg
 Pkg.activate(joinpath(@__DIR__, "build"))
-Pkg.develop(path=@__DIR__)
+const PKG = joinpath(@__DIR__, "julia", "KaosCleaner.jl")   # the Julia package lives in a subdirectory
+Pkg.develop(path=PKG)
 Pkg.add("PackageCompiler")
 Pkg.instantiate()
 
@@ -16,7 +17,7 @@ const OUT = joinpath(@__DIR__, "kaos_binaries")
 # that code path is compiled in rather than JIT-compiled on first use.
 ENV["JULIA_NUM_THREADS"] = "4"
 
-create_library(@__DIR__, OUT;
+create_library(PKG, OUT;
     lib_name="libkaoscleaner",
     precompile_execution_file=joinpath(@__DIR__, "build", "precompile.jl"),
     header_files=[joinpath(@__DIR__, "include", "kaoscleaner.h")],
@@ -74,7 +75,7 @@ end
 
 # pkg-config file, relocatable via ${pcfiledir}, so C builds can use
 # `pkg-config --cflags --libs kaoscleaner` against an unpacked SDK
-version = Pkg.TOML.parsefile(joinpath(@__DIR__, "Project.toml"))["version"]
+version = Pkg.TOML.parsefile(joinpath(PKG, "Project.toml"))["version"]
 libdir = Sys.iswindows() ? "bin" : "lib"
 mkpath(joinpath(OUT, "lib", "pkgconfig"))
 write(joinpath(OUT, "lib", "pkgconfig", "kaoscleaner.pc"), """

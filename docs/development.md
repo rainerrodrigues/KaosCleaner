@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- [Julia](https://julialang.org/downloads/) 1.12 (the version in `Manifest.toml`)
+- [Julia](https://julialang.org/downloads/) 1.12 (the version in `julia/KaosCleaner.jl/Manifest.toml`)
 - Python 3.9+
 - A C compiler (PackageCompiler uses it to link the library; on Windows it
   downloads one itself)
@@ -12,25 +12,25 @@
 
 | Path | What |
 |---|---|
-| `src/KaosCleaner.jl` | Module and C entry points |
-| `src/options.jl` | Cleaning options and their JSON parsing |
-| `src/cleaning.jl` | Loading, text cleaning, renaming, selection, deduplication |
-| `src/inference.jl` | Type inference and imputation |
-| `src/logging.jl` | Buffered logging for the host |
-| `src/cdata.jl` | Arrow C Data Interface export |
-| `src/streaming.jl` | Chunked processing and the Arrow C Stream Interface |
+| `julia/KaosCleaner.jl/src/KaosCleaner.jl` | Module and C entry points |
+| `julia/KaosCleaner.jl/src/options.jl` | Cleaning options and their JSON parsing |
+| `julia/KaosCleaner.jl/src/cleaning.jl` | Loading, text cleaning, renaming, selection, deduplication |
+| `julia/KaosCleaner.jl/src/inference.jl` | Type inference and imputation |
+| `julia/KaosCleaner.jl/src/logging.jl` | Buffered logging for the host |
+| `julia/KaosCleaner.jl/src/cdata.jl` | Arrow C Data Interface export |
+| `julia/KaosCleaner.jl/src/streaming.jl` | Chunked processing and the Arrow C Stream Interface |
 | `build.jl`, `build/` | Engine build: PackageCompiler environment, precompile trace, thread-safe init (`kaos_init.c`) |
 | `include/kaoscleaner.h` | C API |
 | `python/kaos_cleaner/` | Python package: `__init__.py` (public API), `_runtime.py` (finding, unpacking and loading the engine) |
 | `scripts/build_wheel.py` | Packs a build into a platform wheel |
 | `scripts/benchmark.py` | Times pandas, Polars and kaos-cleaner on generated data |
-| `test/`, `python/tests/` | Julia and Python tests |
+| `julia/KaosCleaner.jl/test/`, `python/tests/` | Julia and Python tests |
 | `docs/`, `mkdocs.yml` | This site |
 
 ## Test the engine
 
 ```bash
-julia --project=. -e 'using Pkg; Pkg.test()'
+julia --project=julia/KaosCleaner.jl -e 'using Pkg; Pkg.test()'
 ```
 
 The Julia tests exercise everything, including the C entry points and the
@@ -250,22 +250,31 @@ A green run with no new pull request means every dependency is within its
 bounds. When it does open one, merge it once CI passes; its commits are not
 Conventional Commits, so this never cuts a release. It changes only the
 allowed versions: the compiled library keeps the exact versions pinned in
-`Manifest.toml` until you run `julia --project=. -e "using Pkg; Pkg.update()"`
+`julia/KaosCleaner.jl/Manifest.toml` until you run `julia --project=julia/KaosCleaner.jl -e "using Pkg; Pkg.update()"`
 and commit the result (the weekly CI run already tests the newest versions).
 
 ## Publishing to Julia's General registry
 
-The Julia package (`KaosCleaner`) can be registered so that Julia users get
-it with `Pkg.add("KaosCleaner")`. `Project.toml` already has the required
-compat bounds for every dependency and for Julia itself, which Aqua.jl checks.
+The Julia package (`KaosCleaner`) is a subdirectory package in
+`julia/KaosCleaner.jl`, so Julia users get it with `Pkg.add("KaosCleaner")`
+while the repository keeps its name (General requires repositories of
+root-level packages to end in `.jl`). The subdirectory is self-contained:
+`Project.toml`, `src/`, `test/` (with `test_set.csv`), its own `README.md` and
+a copy of `LICENSE`, because the package server distributes it on its own.
+`Project.toml` has compat bounds for every dependency and for Julia, which
+Aqua.jl checks.
 
 1. Install the [JuliaRegistrator](https://github.com/JuliaRegistries/Registrator.jl)
    GitHub app on this repository.
 2. On the commit to register (a release commit on `main`), comment
-   `@JuliaRegistrator register`. Registrator opens a pull request on
-   [General](https://github.com/JuliaRegistries/General).
+   `@JuliaRegistrator register subdir=julia/KaosCleaner.jl`. Registrator opens
+   a pull request on [General](https://github.com/JuliaRegistries/General).
 3. New packages wait three days before the pull request is merged
    automatically, provided the automated checks pass.
 4. Every later release needs the same comment on its release commit;
-   versions come from `Project.toml`, which semantic-release keeps in step
-   with the Python package.
+   versions come from `julia/KaosCleaner.jl/Project.toml`, which
+   semantic-release keeps in step with the Python package.
+5. After each registration, TagBot (`.github/workflows/TagBot.yml`) tags the
+   registered commit as `KaosCleaner-vX.Y.Z`, separate from the `vX.Y.Z` tags
+   semantic-release creates for the Python package. Julia tags must only be
+   created after registration, so never tag Julia versions by hand.

@@ -2,7 +2,7 @@
 //
 //   cc examples/c/clean.c -Iinclude -Ikaos_binaries/include
 //      -Lkaos_binaries/lib -lkaoscleaner -Wl,-rpath,$PWD/kaos_binaries/lib -o clean  (one line)
-//   ./clean test_set.csv
+//   ./clean julia/KaosCleaner.jl/test/test_set.csv
 #include <stdio.h>
 #include <stdint.h>
 #include "kaoscleaner.h"

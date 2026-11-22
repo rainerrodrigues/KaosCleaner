@@ -25,7 +25,7 @@ jobs:
       - name: Install CompatHelper
         run: julia -e 'using Pkg; Pkg.add(name="CompatHelper", version="3")'
       - name: Run CompatHelper
-        run: julia -e 'using CompatHelper; CompatHelper.main()'
+        run: julia -e 'using CompatHelper; CompatHelper.main(; subdirs = ["julia/KaosCleaner.jl"])'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMPATHELPER_PRIV: ${{ secrets.COMPATHELPER_PRIV }}
